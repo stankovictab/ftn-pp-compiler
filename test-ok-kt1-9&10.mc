@@ -1,3 +1,4 @@
+//OPIS: 9 & 10 test
 int f(int c) {
 	int a;
 	return a;
@@ -8,7 +9,7 @@ int main() {
 	int b, c;
 	a = 2;
 	a = a++;
-	// b = f(a++); // Ne radi num_exp vise, samo id i literal
+	b = f(a++);
 	a = b + c++ - 5;
 	a++;
 	return a;

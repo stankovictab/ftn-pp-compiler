@@ -1,31 +1,30 @@
 // Djordje Stankovic IN13/2018
 
-// Iz tabele mi se ne brisu parametri funkcija, jer onda ne mogu da proverim argumente pri pozivu funkcije, ako ne koristim neku novu strukturu (TODO:)
-// Pri proveri mogucnosti definisanja varijabli moze da se gleda lookup na VAR za celu tabelu, jer se samo varijable i brisu na kraju funkcija, nema ponavljanja gore, pa ce uvek da se misli na funkciju u kojoj smo trenutno, iako sam drugacije implementirao
-// Ne prosirivati tabelu simbola, nego dodavati strukture ovde (nizove, matrice, itd.)
-
-// Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr, ne menja se nista u symtab.h i .c
+// Iz tabele mi se ne brisu parametri funkcija, jer iz tabele simbola proveravam argumente pri pozivu funkcije
 
 /*
 Default atributi u Tabeli Simbola :
 Atribut 1 :
-- Za lokalnu promenljivu - redni broj promenljive (u funkciji, u opsegu),
+- Za lokalnu promenljivu (varijablu) - redni broj promenljive po definisanju u funkciji,
 - Za parametar - redni broj parametra,
 - Za funkciju – broj parametara,
 - Za ostale simbole - nije definisano.
 Atribut 2 :
-- Za funkcije - tip parametra,
-- Za ostale simbole - nije definisano
+- Za funkcije - tip (jedinog) parametra,
+- Za ostale simbole - nije definisano.
 
 Moje izmene :
-Za parametar je atr2 indeks funkcije za koji je
+Za parametar je atr2 indeks funkcije za koji je.
+Za funkcije atr2 vise nije nista
+// TODO: varijable treba sad da imaju atr2
 */
 
-// TODO: Matrica umesto parametri u tabeli simbola
-// Ako to radimo tako moramo da menjamo dosta stvari koje proveravaju postojanje parametara u tabeli simbola, kao npr parametri u definisanju funkcie
-// Mozda moze i bez ovoga, samo da nastavim
+// Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr, ne menja se nista u symtab.h i .c
 
-// TODO: int prvavar = 3; unsigned drugavar = 3u; ne moze?
+// TODO: Svi dodati testovi su za zajednicke zadatke, ja moram za svoje i za nove zajednicke da pravim
+// I svaki svoj do sad da napravim sa opisom i return-om za GK
+
+// TODO: Izvrsavanje koda na pdf-u je ustvari GK (valjda?)
 
 %{
 	#include <stdio.h>
@@ -121,7 +120,7 @@ function
 			// Trazimo da li postoji funkcija u tabeli
 			fun_idx = lookup_symbol($2, FUN);
 			if(fun_idx == NO_INDEX){
-				// Ako ne postoji funkcija, dodaj je, bez atributa
+				// Ako ne postoji funkcija, dodaj je, bez atributa (atr2 vise nije tip (jedinog) parametra)
 				fun_idx = insert_symbol($2, FUN, $1, NO_ATR, NO_ATR);
 				}
 			else 
@@ -134,8 +133,8 @@ function
 		}
 	RPAREN body
 		{
-			// Kada se funkcija zavrsi moramo da izbrisemo sve njene lokalne varijable (TODO: ne diramo parametre, jer ih koristimo za pozive funkcija) 
-			// clear_symbols brise od ovog indeksa pa na dole, pa ce nam ostati samo TODO: parametri
+			// Kada se funkcija zavrsi moramo da izbrisemo sve njene lokalne varijable (ne diramo parametre, jer ih koristimo za pozive funkcija) 
+			// clear_symbols brise od ovog indeksa pa na dole, pa ce nam ostati samo parametri
 			int var_start_index = fun_idx + parameter_number + 1;
 			clear_symbols(var_start_index);
 			var_num = 0;
@@ -275,7 +274,7 @@ statement
 	| function_call SEMICOLON
 	| if_statement
 	| return_statement
-	| increment_statement // Za a++;
+	| increment_statement // a++;
 	| loop
 	| switch_statement // Ovime ne sprecavamo switch u switch-u, mada se to nece ni pregledati
 	;
@@ -284,12 +283,19 @@ compound_statement
 	: body // Bilo je LCURLYBRACKET statement_list RCURLYBRACKET
 	// TODO: Moram da razlikujem svaki compound_statement, da bi nove definisane promenljive u tom telu bile nezavisne od starijih
 	// To cu uraditi za sledecu tacku, za sad se mogu definisati samo one koje se nisu pre
+	// TODO: Svaka varijabla ce sada imati atr2 koji kaze u kojem je bloku, odnosno na kojem je nivou
+	// GVAR ovo nece imati, samo VAR, a nivo 0 je nivo main-a, odnosno nulti blok
 	;
 
 assignment_statement
 	: ID ASSIGN num_exp SEMICOLON
 		{
-		int idx = lookup_symbol($1, VAR|PAR);
+		// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
+		int idx = NO_INDEX;
+		for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $1) == 0)
+					idx = lookup_symbol(get_name(j), VAR|PAR);
+			}
 		if(idx == NO_INDEX)
 			err("Invalid lvalue '%s' in assignment.\n", $1);
 		else
@@ -302,8 +308,11 @@ num_exp
 	: exp
 	| num_exp AROP exp
 		{
-		if(get_type($1) != get_type($3))
-			err("Invalid operands: arithmetic operation (incompatible types).\n");
+			// Tip num_exp-a je tip vrednosti koju taj izraz daje, a taj tip je nasledjen od exp-a
+			// Zna se i tip poziva funkcije (povratne vrednosti) iz toga sto je semanticka vrednost function_call-a indeks funkcije, 
+			// pa ce tu semanticku vrednost imati i exp, pa ce get_type($3) uzeti tacan tip iz simbola kind-a FUN
+			if(get_type($1) != get_type($3))
+				err("Invalid operands: arithmetic operation (incompatible types).\n");
 		}
 	;
 
@@ -311,14 +320,17 @@ exp
 	: literal
 	| ID increment_optional
 		{
-			// Moglo je i da se odvoji na ID i ID INCREMENT ovde, mozda preglednije
-			$$ = lookup_symbol($1, VAR|PAR);
+			// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $1) == 0)
+					$$ = lookup_symbol(get_name(j), VAR|PAR); // Semanticka vrednost exp-a sa ID-em je indeks ID-a u tabeli simbola
+			}
 			if($$ == NO_INDEX)
 				err("'%s' undeclared.\n", $1);
 		}
 	| function_call
 	| LPAREN num_exp RPAREN
-		{ $$ = $2; }
+		{ $$ = $2; /* exp nasledjuje semanticku vrednost num_exp-a u zagradi */ }
 	;
 
 literal
@@ -344,82 +356,62 @@ function_call
 		}
 	LPAREN argument_list RPAREN
 		{
-			// Resetujemo broj argumenata za neki drugi poziv funkcije
-			argument_number = 0;
 			// function_call dobija semanticku vrednost
 			$$ = lookup_symbol($1, FUN);
 		}
 	;
 
+// Mora da se doda kao poseban pojam da ne bi proslo nesto kao
+// b = f(,a,c);
 argument_list
 	: /* empty */
 		{
 			// Ako nismo prosledili argumente, moramo da proverimo da li funkcija zapravo zahteva parametre
 			if(get_atr1(fcall_idx) > 0)
-				err("Function requires arguments!\n");
+				err("Function '%s' requires arguments!\n", get_name(fcall_idx));
 		}
 	| arguments
+		{
+			// Moramo ovde da proverimo broj argumenata, jer argumenti mogu da budu svakakvi, pa nema smisla to proveravati u akcijama dole
+			// U tim akcijama dole se znaci samo postavlja argument_number, ali se ovde proverava
+			if(get_atr1(fcall_idx) > argument_number)
+				err("Too few arguments passed to function '%s'.\n", get_name(fcall_idx));
+			else if(get_atr1(fcall_idx) < argument_number)
+				err("Too many arguments passed to function '%s'.\n", get_name(fcall_idx));
+			else
+				// Tacan broj argumenata, resetujemo za sledeci poziv
+				argument_number = 0;
+		}
 	;
 
-// Mora da se doda kao poseban pojam da ne bi proslo nesto kao
-// b = f(,a,c);
-// TODO: Ne moze poziv funkcije sa num_exp, ali moze sa ID i sa literalom - to znaci da ne moze f(a+b) ili f(g())
-// num_exp ima exp koji ima ID u sebi, pa ne moze da se stavi ovde samo num_exp
-// Ovo cu popraviti za sledecu tacku
+/*
+Samo num_exp ako se stavi, pokrivace i ID i literale (a i numericke izraze i pozive funkcija i inkremente, sve mora da radi)
+Dakle u ovoj proveri trebamo da proveravamo da li se tip poklapa sa trazenim tipom parametra,
+i trebamo da postavimo argument_number za ovu proveru gore
+
+Razlog zasto ne moramo da proveravamo da li VAR|PAR|GVAR koje smo prosledili uopste postoje je zato sto num_exp to automatski radi
+(Ne bismo mogli da napravimo exp uopste a da varijabla nije bila definisana, tako da mora da postoji ako se napravio num_exp)
+Da sam ovo znao ne bi radio sve one provere i razdvajao na ID-eve i literale
+
+TODO: Ne moze poziv u pozivu zbog toga sto je argument_number globalna promenljiva, pa se izmesa kada se radi poziv u pozivu,
+za to bi morao da pravim niz dubina poziva funkcija, gde svaka dubina ima svoj argument number
+*/
 arguments
-	: ID
+	: num_exp
 		{
-			// Ovo je samo za pozive funkcija koje imaju 1 parametar
-			// Argument u pozivu funkcije moze da bude varijabla i parametar trenutne funkcije, pa njih trazimo
-			// Ne mozemo da trazimo po VAR|PAR po celoj tabeli kao pre jer bi to uzelo i parametre drugih funkcija, tako da moramo samo za trenutnu
-			int flag = 0;
-			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				int argument = lookup_symbol(get_name(j), VAR|PAR); 
-				// Treba za else if, ok je ovde da stoji VAR|PAR jer ne moze ispod indeksa funkcije da nadje parametar neke druge
-				if(strcmp(get_name(j), $1) == 0){
-					flag = 1;
-					// Pronasao varijablu ili parametar te funkcije sa istim imenom
-					argument_number = 1; // Sa 0 na 1
-					// Ovo proverava broj parametara funkcije koja je pozvana
-					if ((get_atr1(fcall_idx) == 1) && (argument_number != get_atr1(fcall_idx)))
-						err("Wrong number of arguments sent over to function '%s'", get_name(fcall_idx));
-					// Ako smo ovde dospeli, to znaci da funkcija ima tacno jedan parametar
-					// Proveravamo da li je tip argumenta isti kao tip parametra
-					// Taj parametar je na prvom indeksu ispod funkcije u tabeli simbola, pa je umesto ovog argument_number moglo da stoji i 1
-					if (get_type(argument) != get_type(fcall_idx + argument_number)) 
-						err("Forwarded argument '%s' of wrong type.\n", $1);
-				}
-			}
-			if(flag == 0)
-			// Ako ne nadje znaci da nije definisan
-			err("Argument '%s' is not defined.\n", $1);
+			// Cim nadje jedan parametar radice ovu proveru, ako nadje vise nastavice u sledecoj alternativi
+			argument_number = 1;
+			if(get_type(fcall_idx + argument_number) != get_type($1)) // get_type() za num_exp radi, a radice i u GK zbog indeksa registra sa tipom
+        		err("Forwarded argument '%s' of wrong type.\n", get_name($1));
 		}
-	| arguments COMMA ID
+	| arguments COMMA num_exp
 		{
-			// Za prvi argument u listi je vec uradio proveru gore, sad radi za ostale
-			int flag = 0;
-			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				int argument = lookup_symbol(get_name(j), VAR|PAR); 
-				// Treba za else if, ok je ovde da stoji VAR|PAR jer ne moze ispod indeksa funkcije da nadje parametar neke druge
-				if(strcmp(get_name(j), $3) == 0){
-					flag = 1;
-					// Pronasao varijablu ili parametar te funkcije sa istim imenom
-					argument_number++; // Sa 1 na n
-					// Ovo proverava broj parametara funkcije koja je pozvana
-					if (argument_number > get_atr1(fcall_idx)) // Mora da bude > !
-						err("Wrong number of arguments sent over to function '%s'", get_name(fcall_idx));
-					if (get_type(argument) != get_type(fcall_idx + argument_number)) 
-						err("Forwarded argument '%s' of wrong type.\n", $3);
-				}
+			// Za prvi argument u listi je vec uradio proveru gore, sad radi za ostale, redom
+			argument_number++; // Za svaki argument povecavamo
+			if(get_type(fcall_idx + argument_number) != get_type($3)){
+        		err("Forwarded argument '%s' of wrong type.\n", get_name($3));
 			}
-			if(flag == 0)
-			// Ako ne nadje znaci da nije definisan
-			err("Argument '%s' is not defined.\n", $3);
 		}
-	| literal
-		// TODO:
-	| arguments COMMA literal
-		// TODO:
 	;
 
 if_statement
@@ -462,8 +454,14 @@ return_statement
 increment_statement
 	: ID INCREMENT SEMICOLON
 		{
-			if(lookup_symbol($1, VAR|PAR) == NO_INDEX)
-        		err("'%s' is not declared.\n", $1);
+			// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
+			int idx = NO_INDEX;
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $1) == 0)
+					idx = lookup_symbol(get_name(j), VAR|PAR);
+			}
+			if(idx == NO_INDEX)
+				err("'%s' undeclared.\n", $1);
 		}
 	;
 
@@ -479,8 +477,6 @@ loop
 			// get_name($n) je vrednost literala (njegovo ime), ali string, mora atoi()
 			if(atoi(get_name($6)) >= atoi(get_name($8)))
 				err("Start of loop isn't smaller than the end.\n");
-			
-			// TODO: Deo za izvrsavanje je za sledecu kontrolnu tacku
 		} 
 	| FOR LPAREN TYPE ID ASSIGN literal TO literal STEP literal RPAREN statement
 		{

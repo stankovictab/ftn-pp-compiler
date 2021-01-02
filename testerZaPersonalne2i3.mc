@@ -1,40 +1,8 @@
-int l() {
-	return 0;
-}
-
-int f(unsigned u) {
-	int a;
-	a = l();
-	return 2;
-}
-void k(int i, int ii) {
-}
-
-void g(int a, int z, int w) {
-	int i;
-	unsigned u;
-	int b, c;
-	f(2u);
-	i = f(2u);
-	// f(); Radi, greska kada f ima barem 1 parametar
-	// f(i); Radi, greska kada f trazi unsigned
-	// k(l, c); Radi, greska kada ne postoji l
-	// k(b, u); Radi, greska kada je u unsigned, pogresan tip poslat
-	// k(b, c, i); Radi, greska za previse argumenata
-	k(b, c);
-}
-
-int h(unsigned l) {
-	return 1;
-}
-
 int main() {
 	int d, a, b, c, t;
 	unsigned w;
 	a = 2;
 	a = a++;
-	g(d, a, b);
-	h(w);
 	a = b + c++ - 5;
 	a++;
 
