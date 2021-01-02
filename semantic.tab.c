@@ -66,7 +66,7 @@
 
 
 /* First part of user prologue.  */
-#line 7 "semantic.y"
+#line 30 "semantic.y"
 
 	#include <stdio.h>
 	#include <stdlib.h>
@@ -83,21 +83,20 @@
 	char char_buffer[CHAR_BUFFER_LENGTH];
 	int error_count = 0;
 	int warning_count = 0;
-	int var_num = 0;
-	int fun_idx = -1;
-	int fcall_idx = -1;
+	int var_num = 0; // Trenutan broj lokalnih varijabli u funkciji, resetuje se za svaku funkciju
+	int fun_idx = -1; // Indeks funkcije u kojoj se trenutno nalazimo
+	int fcall_idx = -1; // Indeks funkcije koju pozivamo
 
 	// Dodaci
 	int vartype = 0;
 	int return_flag = 0;
-	int current_function = 0; // TODO: Zameni sa fun_idx jer izgleda da je to to vec definisano
-	int parameter_number = 0;
+	int parameter_number = 0; // Brojac parametara pri definisanju funkcije, potreban za atr1 funkcije u tabeli simbola
 	int argument_number = 0;
-	unsigned switch_type = 0;
+	unsigned switch_type = 0; // TODO: Zasto unsigned? Da li je i bitno uopste?
 	int switch_number = 0;
 	int switch_array[100] = {-2147483648}; // Sve se inicijalizuje na INT_MIN, niz se koristi za proveru vec koriscenih literala u switch_statement
 
-#line 101 "semantic.tab.c"
+#line 100 "semantic.tab.c"
 
 # ifndef YY_CAST
 #  ifdef __cplusplus
@@ -181,12 +180,12 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 38 "semantic.y"
+#line 60 "semantic.y"
 
 	int i;
 	char *s;
 
-#line 190 "semantic.tab.c"
+#line 189 "semantic.tab.c"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -564,14 +563,14 @@ static const yytype_int8 yytranslate[] =
   /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
 static const yytype_int16 yyrline[] =
 {
-       0,    82,    82,    93,    94,    99,   112,    98,   130,   143,
-     129,   161,   165,   174,   175,   179,   195,   201,   202,   207,
-     206,   219,   237,   251,   252,   256,   257,   258,   259,   260,
-     261,   262,   263,   267,   273,   285,   286,   294,   295,   302,
-     303,   308,   311,   316,   317,   322,   321,   339,   351,   360,
-     387,   409,   410,   414,   415,   419,   423,   431,   441,   451,
-     459,   473,   487,   486,   511,   511,   524,   524,   536,   537,
-     541,   542
+       0,   104,   104,   113,   114,   119,   131,   118,   151,   160,
+     150,   175,   178,   188,   189,   193,   211,   217,   218,   223,
+     222,   235,   254,   268,   269,   273,   274,   275,   276,   277,
+     278,   279,   280,   284,   290,   302,   303,   311,   312,   319,
+     320,   325,   328,   333,   334,   339,   338,   356,   361,   370,
+     397,   419,   421,   426,   427,   431,   435,   443,   453,   463,
+     471,   485,   499,   498,   523,   523,   536,   536,   548,   549,
+     553,   554
 };
 #endif
 
@@ -587,7 +586,7 @@ static const char *const yytname[] =
   "ARROW", "OTHERWISE", "FINISH", "LSQUAREBRACKET", "RSQUAREBRACKET",
   "ONLY_IF", "$accept", "program", "function_list", "function", "$@1",
   "$@2", "$@3", "$@4", "parameters_full", "parameters", "parameter",
-  "body", "variable_list", "variables_def", "$@5", "variables_only",
+  "body", "variable_list", "variables_def_line", "$@5", "variables_only",
   "statement_list", "statement", "compound_statement",
   "assignment_statement", "num_exp", "exp", "literal",
   "increment_optional", "function_call", "$@6", "argument_list",
@@ -1458,48 +1457,47 @@ yyreduce:
   switch (yyn)
     {
   case 2:
-#line 83 "semantic.y"
+#line 105 "semantic.y"
                 {  
 			// Javlja gresku ako main() uopste ne postoji u tabeli simbola
 			if(lookup_symbol("main", FUN) == NO_INDEX)
 				err("Undefined reference to 'main'.\n");
-
-			print_symtab();
 		 }
-#line 1470 "semantic.tab.c"
+#line 1467 "semantic.tab.c"
     break;
 
   case 5:
-#line 99 "semantic.y"
+#line 119 "semantic.y"
                 {
 			// fun_idx je indeks ove funkcije
 			// Trazimo da li postoji funkcija u tabeli
 			fun_idx = lookup_symbol((yyvsp[0].s), FUN);
 			if(fun_idx == NO_INDEX){
-				// Ako ne postoji funkcija, dodaj je (bez atributa), i taj indeks stavi u current_function (indeks funkcije koja se obradjuje, koristi se u proverama za varijable kasnije, etc)
+				// Ako ne postoji funkcija, dodaj je, bez atributa
 				fun_idx = insert_symbol((yyvsp[0].s), FUN, (yyvsp[-1].i), NO_ATR, NO_ATR);
-				current_function = fun_idx;
 				}
 			else 
 				err("Redefinition of function '%s'.\n", (yyvsp[0].s));
 		}
-#line 1487 "semantic.tab.c"
+#line 1483 "semantic.tab.c"
     break;
 
   case 6:
-#line 112 "semantic.y"
+#line 131 "semantic.y"
                 {
-			// Kada analiziramo sve parametre update-ujemo broj parametra za simbol funkcije
+			// Kada analiziramo sve parametre, update-ujemo broj parametra za simbol funkcije
 			set_atr1(fun_idx, parameter_number);
 		}
-#line 1496 "semantic.tab.c"
+#line 1492 "semantic.tab.c"
     break;
 
   case 7:
-#line 117 "semantic.y"
+#line 136 "semantic.y"
                 {
-			// Kada se funkcija zavrsi, moramo da izbrisemo sve njene varijable (ne diramo parametre, jer ih koristimo za pozive funkcija) - clear_symbols brise od ovog indeksa pa na dole, sto i ostavlja samo varijable, a ovaj indeks je pocetak varijabli
-			clear_symbols(fun_idx + parameter_number + 1);
+			// Kada se funkcija zavrsi moramo da izbrisemo sve njene lokalne varijable (TODO: ne diramo parametre, jer ih koristimo za pozive funkcija) 
+			// clear_symbols brise od ovog indeksa pa na dole, pa ce nam ostati samo TODO: parametri
+			int var_start_index = fun_idx + parameter_number + 1;
+			clear_symbols(var_start_index);
 			var_num = 0;
 			// Non-void funkcije moraju imati povratnu vrednost, pa koristimo flag da proverimo da li smo ga iskoristili
 			if(return_flag == 0)
@@ -1509,132 +1507,127 @@ yyreduce:
 			// Resetujemo broj parametra za nove funkcije
 			parameter_number = 0;
 		}
-#line 1513 "semantic.tab.c"
+#line 1511 "semantic.tab.c"
     break;
 
   case 8:
-#line 130 "semantic.y"
+#line 151 "semantic.y"
                 {
-			// fun_idx je indeks ove funkcije
-			// Trazimo da li postoji funkcija u tabeli
 			fun_idx = lookup_symbol((yyvsp[0].s), FUN);
 			if(fun_idx == NO_INDEX){
-				// Ako ne postoji funkcija, dodaj je (bez atributa), i taj indeks stavi u current_function (indeks funkcije koja se obradjuje, koristi se u proverama za varijable kasnije, etc)
 				fun_idx = insert_symbol((yyvsp[0].s), FUN, (yyvsp[-1].i), NO_ATR, NO_ATR);
-				current_function = fun_idx;
 			}
 			else 
 				err("Redefinition of function '%s'.\n", (yyvsp[0].s));
 		}
-#line 1530 "semantic.tab.c"
+#line 1524 "semantic.tab.c"
     break;
 
   case 9:
-#line 143 "semantic.y"
+#line 160 "semantic.y"
                 {
-			// Kada analiziramo sve parametre update-ujemo broj parametra za simbol funkcije
 			set_atr1(fun_idx, parameter_number);
 		}
-#line 1539 "semantic.tab.c"
+#line 1532 "semantic.tab.c"
     break;
 
   case 10:
-#line 148 "semantic.y"
+#line 164 "semantic.y"
                 {
-			// Kada se funkcija zavrsi, moramo da izbrisemo sve njene varijable (ne diramo parametre, jer ih koristimo za pozive funkcija) - clear_symbols brise od ovog indeksa pa na dole, sto i ostavlja samo varijable, a ovaj indeks je pocetak varijabli
 			clear_symbols(fun_idx + parameter_number + 1);
 			var_num = 0;
-			// Resetujemo return flag za nove funkcije
+			// Jedina razlika u odnosu na gornju alternativu - ovde ne proveravamo return_flag kao gore jer void funkcije nemaju povratnu vrednost
 			return_flag = 0;
-			// Resetujemo broj parametra za nove funkcije
 			parameter_number = 0;
 		}
-#line 1553 "semantic.tab.c"
+#line 1544 "semantic.tab.c"
     break;
 
   case 11:
-#line 161 "semantic.y"
+#line 175 "semantic.y"
                 {
-			// Postavljamo broj parametara funkcije na 0 ako nema parametara
 			set_atr1(fun_idx, 0);
 		}
-#line 1562 "semantic.tab.c"
+#line 1552 "semantic.tab.c"
     break;
 
   case 15:
-#line 180 "semantic.y"
+#line 194 "semantic.y"
                 {
-			// Za svaki parametar moramo da povecamo broj parametara za tabelu simbola
-			parameter_number++;
-			// Proveravamo da li je trenutni parametar vec definisan tako sto prolazimo kroz tabelu simbola od indeksa funkcija (nju ne ubrajamo) na nize, i gledamo nazive ostalih simbola do kraja tabele, jer se varijable jos uvek nisu definisale, pa bi uporedjivali samo parametre te funkcije
-			for(int j = current_function + 1; j <= get_last_element(); j++){
+			// Pre ubacivanja proveravamo da li je trenutni parametar vec definisan za trenutnu funkciju preko tabele simbola
+			// Gledamo od indeksa funkcije do kraja tabele, jer varijabli nema
+			// Ne ubrajamo simbol funkcije za slucaj int foo(unsigned foo){...}
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				if(strcmp(get_name(j), (yyvsp[0].s)) == 0){
 					err("Redifinition of parameter '%s'.\n", (yyvsp[0].s));
 				}
 			}
-			// Ako ne dodje do greske znaci da ne postoji parametar sa takvim nazivom. Ovde smo mogli i current_function da stavimo.
-			insert_symbol((yyvsp[0].s), PAR, (yyvsp[-1].i), 1, fun_idx);
+			// Za svaki parametar koji prodje moramo da povecamo broj parametara za atr1 funkcije
+			parameter_number++;
+			// Pri ubacivanju se postavlja redni broj parametra, kao i indeks funkcije za koji je
+			insert_symbol((yyvsp[0].s), PAR, (yyvsp[-1].i), parameter_number, fun_idx); 
 		}
-#line 1579 "semantic.tab.c"
+#line 1571 "semantic.tab.c"
     break;
 
   case 19:
-#line 207 "semantic.y"
+#line 223 "semantic.y"
                 {
 			// Mora u ovoj akciji da se izmeni vartype, da bi mogao da se koristi u variables_only
 			vartype = (yyvsp[0].i);
 		}
-#line 1588 "semantic.tab.c"
+#line 1580 "semantic.tab.c"
     break;
 
   case 20:
-#line 212 "semantic.y"
+#line 228 "semantic.y"
                 {
-			// Kada smo iskoristili vartype, moramo da ga resetujemo (cim se napravi variables_def)
+			// Kada smo iskoristili vartype, moramo da ga resetujemo (cim se napravi variables_def_line)
 			vartype = 0;
 		}
-#line 1597 "semantic.tab.c"
+#line 1589 "semantic.tab.c"
     break;
 
   case 21:
-#line 220 "semantic.y"
+#line 236 "semantic.y"
                 {
-			// Mora da proverava $1 sada, i da koristi vartype kao tip simbola
 			// Pri deklarisanju varijable trebamo da proverimo da li vec u toj trenutnoj funkciji postoje varijable ili parametri sa tim imenom
 			// To znaci da varijabla moze imati isto ime kao neka prethodna funkcija ili njeni parametri
-			// Ne mozemo da gledamo po lookup_symbol(VAR|PAR) jer to gleda celu tabelu (od nazad pa do 13. registra (FUNREG)) - pravi problem zbog parametara, jer se oni ne brisu na kraju funkcije
-			// Iteriramo od indeksa funkcije u kojoj je deklarisana varijabla (current_function) do kraja tabele simbola (get_last_element)
-			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku
-			// Ako ne nadjemo nista da se poklapa, dodajemo u tabelu
+			// Ne mozemo da gledamo po lookup_symbol(VAR|PAR) jer to gleda celu tabelu (od nazad pa do 13. registra (FUNREG)) 
+			// To pravi problem zbog parametara, jer se oni ne brisu na kraju funkcije
+			// Idemo od indeksa funkcije u kojoj je deklarisana varijabla (fun_idx) do kraja tabele
+			// Ne gledamo sam simbol funkcije jer lokalna varijabla moze da ima isto ime kao njena funkcija
+			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku, ako ne nadje isto ime dodajemo
+			// Za tip varijable koristimo vartype koji je postavljen u variables_def_line
 
-			for(int i = current_function + 1; i <= get_last_element(); i++){
-				// Mozemo da preskocimo prvi jer je to ustvari funkcija
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), (yyvsp[0].s)) == 0){
 					err("Variable or parameter by the name '%s' already exists.\n", (yyvsp[0].s));
 				}
 			}
-			insert_symbol((yyvsp[0].s), VAR, vartype, ++var_num, NO_ATR);
+			var_num++;
+			insert_symbol((yyvsp[0].s), VAR, vartype, var_num, NO_ATR);
 		}
-#line 1619 "semantic.tab.c"
+#line 1612 "semantic.tab.c"
     break;
 
   case 22:
-#line 238 "semantic.y"
+#line 255 "semantic.y"
                 {
 			// Ista provera i za ovu alternativu
-			for(int i = current_function + 1; i <= get_last_element(); i++){
-				// Mozemo da preskocimo prvi jer je to ustvari funkcija
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), (yyvsp[0].s)) == 0){
 					err("Variable or parameter by the name '%s' already exists.\n", (yyvsp[0].s));
 				}
 			}
-			insert_symbol((yyvsp[0].s), VAR, vartype, ++var_num, NO_ATR);
+			var_num++;
+			insert_symbol((yyvsp[0].s), VAR, vartype, var_num, NO_ATR);
 		}
-#line 1634 "semantic.tab.c"
+#line 1627 "semantic.tab.c"
     break;
 
   case 34:
-#line 274 "semantic.y"
+#line 291 "semantic.y"
                 {
 		int idx = lookup_symbol((yyvsp[-3].s), VAR|PAR);
 		if(idx == NO_INDEX)
@@ -1643,94 +1636,87 @@ yyreduce:
 			if(get_type(idx) != get_type((yyvsp[-1].i)))
 			err("Incompatible types in assignment.\n");
 		}
-#line 1647 "semantic.tab.c"
+#line 1640 "semantic.tab.c"
     break;
 
   case 36:
-#line 287 "semantic.y"
+#line 304 "semantic.y"
                 {
 		if(get_type((yyvsp[-2].i)) != get_type((yyvsp[0].i)))
 			err("Invalid operands: arithmetic operation (incompatible types).\n");
 		}
-#line 1656 "semantic.tab.c"
+#line 1649 "semantic.tab.c"
     break;
 
   case 38:
-#line 296 "semantic.y"
+#line 313 "semantic.y"
                 {
 			// Moglo je i da se odvoji na ID i ID INCREMENT ovde, mozda preglednije
 			(yyval.i) = lookup_symbol((yyvsp[-1].s), VAR|PAR);
 			if((yyval.i) == NO_INDEX)
 				err("'%s' undeclared.\n", (yyvsp[-1].s));
 		}
-#line 1667 "semantic.tab.c"
+#line 1660 "semantic.tab.c"
     break;
 
   case 40:
-#line 304 "semantic.y"
+#line 321 "semantic.y"
                 { (yyval.i) = (yyvsp[-1].i); }
-#line 1673 "semantic.tab.c"
+#line 1666 "semantic.tab.c"
     break;
 
   case 41:
-#line 309 "semantic.y"
+#line 326 "semantic.y"
                 { (yyval.i) = insert_literal((yyvsp[0].s), INT); }
-#line 1679 "semantic.tab.c"
+#line 1672 "semantic.tab.c"
     break;
 
   case 42:
-#line 312 "semantic.y"
+#line 329 "semantic.y"
                 { (yyval.i) = insert_literal((yyvsp[0].s), UINT); }
-#line 1685 "semantic.tab.c"
+#line 1678 "semantic.tab.c"
     break;
 
   case 45:
-#line 322 "semantic.y"
+#line 339 "semantic.y"
                 {
 			// Ovo je indeks funkcije koju pozivamo u tabeli simbola, koristi se kod argumenata
 			fcall_idx = lookup_symbol((yyvsp[0].s), FUN); 
 			if(fcall_idx == NO_INDEX)
 				err("'%s' is not a function.\n", (yyvsp[0].s));
 		}
-#line 1696 "semantic.tab.c"
+#line 1689 "semantic.tab.c"
     break;
 
   case 46:
-#line 329 "semantic.y"
+#line 346 "semantic.y"
                 {
 			// Resetujemo broj argumenata za neki drugi poziv funkcije
 			argument_number = 0;
 			// function_call dobija semanticku vrednost
 			(yyval.i) = lookup_symbol((yyvsp[-4].s), FUN);
 		}
-#line 1707 "semantic.tab.c"
+#line 1700 "semantic.tab.c"
     break;
 
   case 47:
-#line 339 "semantic.y"
+#line 356 "semantic.y"
                 {
-			// current_function nije ono sto nam treba, treba da nadjemo atr1 (broj parametara) funkcije koje pozivamo
-			// To radimo tako sto idemo od trenutne funkcije u tabeli simbola na gore i gledamo atr1 od simbola funkcije koju pozivamo
-			// Ili samo uzmemo fcall_idx koji bas za to sluzi
-			for(int j = current_function; j > FUN_REG; j--){ // FUN_REG je makro za 13
-				//int argument = lookup_symbol(get_name(j), FUN);
-				if(fcall_idx == j){
-					if(get_atr1(fcall_idx) > 0)
-						err("Function doesn't require any arguments.\n");
-				}
-			}
+			// Ako nismo prosledili argumente, moramo da proverimo da li funkcija zapravo zahteva parametre
+			if(get_atr1(fcall_idx) > 0)
+				err("Function requires arguments!\n");
 		}
-#line 1724 "semantic.tab.c"
+#line 1710 "semantic.tab.c"
     break;
 
   case 49:
-#line 361 "semantic.y"
+#line 371 "semantic.y"
                 {
 			// Ovo je samo za pozive funkcija koje imaju 1 parametar
 			// Argument u pozivu funkcije moze da bude varijabla i parametar trenutne funkcije, pa njih trazimo
 			// Ne mozemo da trazimo po VAR|PAR po celoj tabeli kao pre jer bi to uzelo i parametre drugih funkcija, tako da moramo samo za trenutnu
 			int flag = 0;
-			for(int j = current_function + 1; j <= get_last_element(); j++){
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				int argument = lookup_symbol(get_name(j), VAR|PAR); 
 				// Treba za else if, ok je ovde da stoji VAR|PAR jer ne moze ispod indeksa funkcije da nadje parametar neke druge
 				if(strcmp(get_name(j), (yyvsp[0].s)) == 0){
@@ -1751,15 +1737,15 @@ yyreduce:
 			// Ako ne nadje znaci da nije definisan
 			err("Argument '%s' is not defined.\n", (yyvsp[0].s));
 		}
-#line 1755 "semantic.tab.c"
+#line 1741 "semantic.tab.c"
     break;
 
   case 50:
-#line 388 "semantic.y"
+#line 398 "semantic.y"
                 {
 			// Za prvi argument u listi je vec uradio proveru gore, sad radi za ostale
 			int flag = 0;
-			for(int j = current_function + 1; j <= get_last_element(); j++){
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				int argument = lookup_symbol(get_name(j), VAR|PAR); 
 				// Treba za else if, ok je ovde da stoji VAR|PAR jer ne moze ispod indeksa funkcije da nadje parametar neke druge
 				if(strcmp(get_name(j), (yyvsp[0].s)) == 0){
@@ -1777,20 +1763,20 @@ yyreduce:
 			// Ako ne nadje znaci da nije definisan
 			err("Argument '%s' is not defined.\n", (yyvsp[0].s));
 		}
-#line 1781 "semantic.tab.c"
+#line 1767 "semantic.tab.c"
     break;
 
   case 56:
-#line 424 "semantic.y"
+#line 436 "semantic.y"
                 {
 			if(get_type((yyvsp[-2].i)) != get_type((yyvsp[0].i)))
 				err("Invalid operands: relational operator.\n");
 		}
-#line 1790 "semantic.tab.c"
+#line 1776 "semantic.tab.c"
     break;
 
   case 57:
-#line 432 "semantic.y"
+#line 444 "semantic.y"
                 {
 			// Javlja se return, postavljamo flag (cak iako tip povratne vrednosti nije dobar)
 			return_flag = 1;
@@ -1800,31 +1786,31 @@ yyreduce:
 			if(get_type(fun_idx) == VOID)
 				err("Function of type VOID can't return an expression.\n");
 		}
-#line 1804 "semantic.tab.c"
+#line 1790 "semantic.tab.c"
     break;
 
   case 58:
-#line 442 "semantic.y"
+#line 454 "semantic.y"
                 {
 			// Posto void funkcija ne zahteva return, ne moramo postavljati flag
 			// Posto je ovo samo za void funkcije, za one koje nisu void moramo da kazemo da mora da vrati neki num_exp
 			if(get_type(fun_idx) != VOID)
 				warn("Non-void function has to return a value.\n");
 		}
-#line 1815 "semantic.tab.c"
+#line 1801 "semantic.tab.c"
     break;
 
   case 59:
-#line 452 "semantic.y"
+#line 464 "semantic.y"
                 {
 			if(lookup_symbol((yyvsp[-2].s), VAR|PAR) == NO_INDEX)
         		err("'%s' is not declared.\n", (yyvsp[-2].s));
 		}
-#line 1824 "semantic.tab.c"
+#line 1810 "semantic.tab.c"
     break;
 
   case 60:
-#line 461 "semantic.y"
+#line 473 "semantic.y"
                 {
 			// Literal moze da bude i INT i UINT
 			if((yyvsp[-7].i) != get_type((yyvsp[-4].i))
@@ -1837,11 +1823,11 @@ yyreduce:
 			
 			// TODO: Deo za izvrsavanje je za sledecu kontrolnu tacku
 		}
-#line 1841 "semantic.tab.c"
+#line 1827 "semantic.tab.c"
     break;
 
   case 61:
-#line 474 "semantic.y"
+#line 486 "semantic.y"
                 {
 			if((yyvsp[-9].i) != get_type((yyvsp[-6].i))
 				|| (yyvsp[-9].i) != get_type((yyvsp[-4].i))
@@ -1851,17 +1837,17 @@ yyreduce:
 			if(atoi(get_name((yyvsp[-6].i))) >= atoi(get_name((yyvsp[-4].i))))
 				err("Start of loop isn't smaller than the end.\n");
 		}
-#line 1855 "semantic.tab.c"
+#line 1841 "semantic.tab.c"
     break;
 
   case 62:
-#line 487 "semantic.y"
+#line 499 "semantic.y"
                 {
 			// Provera da li je ID po kojem se radi switch vec definisana promenljiva, ako jeste ok je
 			// Takodje, pamtimo tip te promenljive za proveru u svakom case-u da li je literal dobrog tipa
 			int switcher = 0;
 			int flag = 0;
-			for(int i = current_function + 1; i <= get_last_element(); i++){
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				// Mozemo da preskocimo prvi jer je to ustvari funkcija
 				if(strcmp(get_name(i), (yyvsp[0].s)) == 0){
 					// Nadjen, postavljamo flag za gresku i switcher za tip
@@ -1876,11 +1862,11 @@ yyreduce:
 				switch_array[i] = -2147483648;
 			// TODO: Deo za izvrsavanje je za sledecu tacku
 		}
-#line 1880 "semantic.tab.c"
+#line 1866 "semantic.tab.c"
     break;
 
   case 64:
-#line 511 "semantic.y"
+#line 523 "semantic.y"
                             {
 		// Posto bi $2 bio indeks u tabeli, moramo lookup_symbol da dobijemo vrednost
 		// get_type($2) bi vratilo tip literala, jer je $2 indeks
@@ -1894,11 +1880,11 @@ yyreduce:
 		}
 
 	}
-#line 1898 "semantic.tab.c"
+#line 1884 "semantic.tab.c"
     break;
 
   case 66:
-#line 524 "semantic.y"
+#line 536 "semantic.y"
                                       {
 		if(get_type((yyvsp[0].i)) != switch_type)
 			err("Type of literal not the same as type of switcher.\n");
@@ -1908,11 +1894,11 @@ yyreduce:
 				err("Literal already in use in switch statement.\n");
 		}
 	}
-#line 1912 "semantic.tab.c"
+#line 1898 "semantic.tab.c"
     break;
 
 
-#line 1916 "semantic.tab.c"
+#line 1902 "semantic.tab.c"
 
       default: break;
     }
@@ -2144,7 +2130,7 @@ yyreturn:
 #endif
   return yyresult;
 }
-#line 545 "semantic.y"
+#line 557 "semantic.y"
 
 
 int yyerror(char *s) {

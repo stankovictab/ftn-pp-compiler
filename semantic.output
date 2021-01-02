@@ -30,11 +30,11 @@ Grammar
    15 body: LCURLYBRACKET variable_list statement_list RCURLYBRACKET
 
    16 variable_list: %empty
-   17              | variable_list variables_def
+   17              | variable_list variables_def_line
 
    18 $@5: %empty
 
-   19 variables_def: TYPE $@5 variables_only SEMICOLON
+   19 variables_def_line: TYPE $@5 variables_only SEMICOLON
 
    20 variables_only: ID
    21               | variables_only COMMA ID
@@ -190,7 +190,7 @@ Nonterminals, with rules where they appear
     variable_list (44)
         on left: 16 17
         on right: 15 17
-    variables_def (45)
+    variables_def_line (45)
         on left: 19
         on right: 17
     $@5 (46)
@@ -524,19 +524,19 @@ State 28
 State 29
 
    15 body: LCURLYBRACKET variable_list . statement_list RCURLYBRACKET
-   17 variable_list: variable_list . variables_def
+   17 variable_list: variable_list . variables_def_line
 
     TYPE  shift, and go to state 30
 
     $default  reduce using rule 22 (statement_list)
 
-    variables_def   go to state 31
-    statement_list  go to state 32
+    variables_def_line  go to state 31
+    statement_list      go to state 32
 
 
 State 30
 
-   19 variables_def: TYPE . $@5 variables_only SEMICOLON
+   19 variables_def_line: TYPE . $@5 variables_only SEMICOLON
 
     $default  reduce using rule 18 ($@5)
 
@@ -545,7 +545,7 @@ State 30
 
 State 31
 
-   17 variable_list: variable_list variables_def .
+   17 variable_list: variable_list variables_def_line .
 
     $default  reduce using rule 17 (variable_list)
 
@@ -578,7 +578,7 @@ State 32
 
 State 33
 
-   19 variables_def: TYPE $@5 . variables_only SEMICOLON
+   19 variables_def_line: TYPE $@5 . variables_only SEMICOLON
 
     ID  shift, and go to state 51
 
@@ -734,7 +734,7 @@ State 51
 
 State 52
 
-   19 variables_def: TYPE $@5 variables_only . SEMICOLON
+   19 variables_def_line: TYPE $@5 variables_only . SEMICOLON
    21 variables_only: variables_only . COMMA ID
 
     SEMICOLON  shift, and go to state 70
@@ -914,9 +914,9 @@ State 69
 
 State 70
 
-   19 variables_def: TYPE $@5 variables_only SEMICOLON .
+   19 variables_def_line: TYPE $@5 variables_only SEMICOLON .
 
-    $default  reduce using rule 19 (variables_def)
+    $default  reduce using rule 19 (variables_def_line)
 
 
 State 71

@@ -4,6 +4,29 @@
 // Pri proveri mogucnosti definisanja varijabli moze da se gleda lookup na VAR za celu tabelu, jer se samo varijable i brisu na kraju funkcija, nema ponavljanja gore, pa ce uvek da se misli na funkciju u kojoj smo trenutno, iako sam drugacije implementirao
 // Ne prosirivati tabelu simbola, nego dodavati strukture ovde (nizove, matrice, itd.)
 
+// Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr, ne menja se nista u symtab.h i .c
+
+/*
+Default atributi u Tabeli Simbola :
+Atribut 1 :
+- Za lokalnu promenljivu - redni broj promenljive (u funkciji, u opsegu),
+- Za parametar - redni broj parametra,
+- Za funkciju – broj parametara,
+- Za ostale simbole - nije definisano.
+Atribut 2 :
+- Za funkcije - tip parametra,
+- Za ostale simbole - nije definisano
+
+Moje izmene :
+Za parametar je atr2 indeks funkcije za koji je
+*/
+
+// TODO: Matrica umesto parametri u tabeli simbola
+// Ako to radimo tako moramo da menjamo dosta stvari koje proveravaju postojanje parametara u tabeli simbola, kao npr parametri u definisanju funkcie
+// Mozda moze i bez ovoga, samo da nastavim
+
+// TODO: int prvavar = 3; unsigned drugavar = 3u; ne moze?
+
 %{
 	#include <stdio.h>
 	#include <stdlib.h>
@@ -20,17 +43,16 @@
 	char char_buffer[CHAR_BUFFER_LENGTH];
 	int error_count = 0;
 	int warning_count = 0;
-	int var_num = 0;
-	int fun_idx = -1;
-	int fcall_idx = -1;
+	int var_num = 0; // Trenutan broj lokalnih varijabli u funkciji, resetuje se za svaku funkciju
+	int fun_idx = -1; // Indeks funkcije u kojoj se trenutno nalazimo
+	int fcall_idx = -1; // Indeks funkcije koju pozivamo
 
 	// Dodaci
 	int vartype = 0;
 	int return_flag = 0;
-	int current_function = 0; // TODO: Zameni sa fun_idx jer izgleda da je to to vec definisano
-	int parameter_number = 0;
+	int parameter_number = 0; // Brojac parametara pri definisanju funkcije, potreban za atr1 funkcije u tabeli simbola
 	int argument_number = 0;
-	unsigned switch_type = 0;
+	unsigned switch_type = 0; // TODO: Zasto unsigned? Da li je i bitno uopste?
 	int switch_number = 0;
 	int switch_array[100] = {-2147483648}; // Sve se inicijalizuje na INT_MIN, niz se koristi za proveru vec koriscenih literala u switch_statement
 %} 
@@ -84,8 +106,6 @@ program
 			// Javlja gresku ako main() uopste ne postoji u tabeli simbola
 			if(lookup_symbol("main", FUN) == NO_INDEX)
 				err("Undefined reference to 'main'.\n");
-
-			print_symtab();
 		 }
 	;
 
@@ -101,22 +121,23 @@ function
 			// Trazimo da li postoji funkcija u tabeli
 			fun_idx = lookup_symbol($2, FUN);
 			if(fun_idx == NO_INDEX){
-				// Ako ne postoji funkcija, dodaj je (bez atributa), i taj indeks stavi u current_function (indeks funkcije koja se obradjuje, koristi se u proverama za varijable kasnije, etc)
+				// Ako ne postoji funkcija, dodaj je, bez atributa
 				fun_idx = insert_symbol($2, FUN, $1, NO_ATR, NO_ATR);
-				current_function = fun_idx;
 				}
 			else 
 				err("Redefinition of function '%s'.\n", $2);
 		}
 	LPAREN parameters_full 
 		{
-			// Kada analiziramo sve parametre update-ujemo broj parametra za simbol funkcije
+			// Kada analiziramo sve parametre, update-ujemo broj parametra za simbol funkcije
 			set_atr1(fun_idx, parameter_number);
 		}
 	RPAREN body
 		{
-			// Kada se funkcija zavrsi, moramo da izbrisemo sve njene varijable (ne diramo parametre, jer ih koristimo za pozive funkcija) - clear_symbols brise od ovog indeksa pa na dole, sto i ostavlja samo varijable, a ovaj indeks je pocetak varijabli
-			clear_symbols(fun_idx + parameter_number + 1);
+			// Kada se funkcija zavrsi moramo da izbrisemo sve njene lokalne varijable (TODO: ne diramo parametre, jer ih koristimo za pozive funkcija) 
+			// clear_symbols brise od ovog indeksa pa na dole, pa ce nam ostati samo TODO: parametri
+			int var_start_index = fun_idx + parameter_number + 1;
+			clear_symbols(var_start_index);
 			var_num = 0;
 			// Non-void funkcije moraju imati povratnu vrednost, pa koristimo flag da proverimo da li smo ga iskoristili
 			if(return_flag == 0)
@@ -128,30 +149,23 @@ function
 		}
 	| VOIDTYPE ID
 		{
-			// fun_idx je indeks ove funkcije
-			// Trazimo da li postoji funkcija u tabeli
 			fun_idx = lookup_symbol($2, FUN);
 			if(fun_idx == NO_INDEX){
-				// Ako ne postoji funkcija, dodaj je (bez atributa), i taj indeks stavi u current_function (indeks funkcije koja se obradjuje, koristi se u proverama za varijable kasnije, etc)
 				fun_idx = insert_symbol($2, FUN, $1, NO_ATR, NO_ATR);
-				current_function = fun_idx;
 			}
 			else 
 				err("Redefinition of function '%s'.\n", $2);
 		}
 	LPAREN parameters_full 
 		{
-			// Kada analiziramo sve parametre update-ujemo broj parametra za simbol funkcije
 			set_atr1(fun_idx, parameter_number);
 		}
 	RPAREN body
 		{
-			// Kada se funkcija zavrsi, moramo da izbrisemo sve njene varijable (ne diramo parametre, jer ih koristimo za pozive funkcija) - clear_symbols brise od ovog indeksa pa na dole, sto i ostavlja samo varijable, a ovaj indeks je pocetak varijabli
 			clear_symbols(fun_idx + parameter_number + 1);
 			var_num = 0;
-			// Resetujemo return flag za nove funkcije
+			// Jedina razlika u odnosu na gornju alternativu - ovde ne proveravamo return_flag kao gore jer void funkcije nemaju povratnu vrednost
 			return_flag = 0;
-			// Resetujemo broj parametra za nove funkcije
 			parameter_number = 0;
 		}
 	;
@@ -159,15 +173,15 @@ function
 parameters_full
 	: /* empty */
 		{
-			// Postavljamo broj parametara funkcije na 0 ako nema parametara
 			set_atr1(fun_idx, 0);
 		}
 	| parameters
-	/*  Moramo da razdvojimo parametre u 3 dela zbog rekurzije.
-		Da smo pisali u 2 ovde na ovaj nacin :
-		parameters_full : | parameter | paramers_full COMMA parameter
+	/*  Moramo da razdvojimo parametre u 3 dela (3 pojma) zbog rekurzije.
+		Da smo pisali u 2 bilo bi
+		parameters_full : | parameter | parameters_full COMMA parameter
 		onda bi proslo int f(, int a, int b){},
-		jer bi empty gledao kao jedan parametar */
+		jer bi empty gledao kao jedan parametar,
+		a ovako kazemo da ova alternativa moze imati >= 1 parametar. */
 	;
 
 parameters
@@ -176,18 +190,20 @@ parameters
 	;
 
 parameter
-	: TYPE ID // Ne moze biti VOIDTYPE
+	: TYPE ID // Parametar ne moze biti VOIDTYPE
 		{
-			// Za svaki parametar moramo da povecamo broj parametara za tabelu simbola
-			parameter_number++;
-			// Proveravamo da li je trenutni parametar vec definisan tako sto prolazimo kroz tabelu simbola od indeksa funkcija (nju ne ubrajamo) na nize, i gledamo nazive ostalih simbola do kraja tabele, jer se varijable jos uvek nisu definisale, pa bi uporedjivali samo parametre te funkcije
-			for(int j = current_function + 1; j <= get_last_element(); j++){
+			// Pre ubacivanja proveravamo da li je trenutni parametar vec definisan za trenutnu funkciju preko tabele simbola
+			// Gledamo od indeksa funkcije do kraja tabele, jer varijabli nema
+			// Ne ubrajamo simbol funkcije za slucaj int foo(unsigned foo){...}
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				if(strcmp(get_name(j), $2) == 0){
 					err("Redifinition of parameter '%s'.\n", $2);
 				}
 			}
-			// Ako ne dodje do greske znaci da ne postoji parametar sa takvim nazivom. Ovde smo mogli i current_function da stavimo.
-			insert_symbol($2, PAR, $1, 1, fun_idx);
+			// Za svaki parametar koji prodje moramo da povecamo broj parametara za atr1 funkcije
+			parameter_number++;
+			// Pri ubacivanju se postavlja redni broj parametra, kao i indeks funkcije za koji je
+			insert_symbol($2, PAR, $1, parameter_number, fun_idx); 
 		}
 	;
 
@@ -195,22 +211,22 @@ body
 	: LCURLYBRACKET variable_list statement_list RCURLYBRACKET
 	;
 
-// Ova implementacija moze da ima vise linija definicija
+// variable_list moze da ima vise linija definicija, gde svaka linija moze da ima ili jednu ili vise varijabli
 // Da smo stavili variable_list : | variable_list variables SEMICOLON to bi bila samo jedna linija
 variable_list
 	: /* empty */
-	| variable_list variables_def
+	| variable_list variables_def_line
 	;
 
-variables_def 
-	: TYPE // Ne moze biti VOIDTYPE
+variables_def_line
+	: TYPE // Ne moze biti VOIDTYPE, a sve varijable u liniji imaju isti tip
 		{
 			// Mora u ovoj akciji da se izmeni vartype, da bi mogao da se koristi u variables_only
 			vartype = $1;
 		}
 	variables_only SEMICOLON 
 		{
-			// Kada smo iskoristili vartype, moramo da ga resetujemo (cim se napravi variables_def)
+			// Kada smo iskoristili vartype, moramo da ga resetujemo (cim se napravi variables_def_line)
 			vartype = 0;
 		}
 	;
@@ -218,32 +234,33 @@ variables_def
 variables_only
 	: ID
 		{
-			// Mora da proverava $1 sada, i da koristi vartype kao tip simbola
 			// Pri deklarisanju varijable trebamo da proverimo da li vec u toj trenutnoj funkciji postoje varijable ili parametri sa tim imenom
 			// To znaci da varijabla moze imati isto ime kao neka prethodna funkcija ili njeni parametri
-			// Ne mozemo da gledamo po lookup_symbol(VAR|PAR) jer to gleda celu tabelu (od nazad pa do 13. registra (FUNREG)) - pravi problem zbog parametara, jer se oni ne brisu na kraju funkcije
-			// Iteriramo od indeksa funkcije u kojoj je deklarisana varijabla (current_function) do kraja tabele simbola (get_last_element)
-			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku
-			// Ako ne nadjemo nista da se poklapa, dodajemo u tabelu
+			// Ne mozemo da gledamo po lookup_symbol(VAR|PAR) jer to gleda celu tabelu (od nazad pa do 13. registra (FUNREG)) 
+			// To pravi problem zbog parametara, jer se oni ne brisu na kraju funkcije
+			// Idemo od indeksa funkcije u kojoj je deklarisana varijabla (fun_idx) do kraja tabele
+			// Ne gledamo sam simbol funkcije jer lokalna varijabla moze da ima isto ime kao njena funkcija
+			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku, ako ne nadje isto ime dodajemo
+			// Za tip varijable koristimo vartype koji je postavljen u variables_def_line
 
-			for(int i = current_function + 1; i <= get_last_element(); i++){
-				// Mozemo da preskocimo prvi jer je to ustvari funkcija
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $1) == 0){
 					err("Variable or parameter by the name '%s' already exists.\n", $1);
 				}
 			}
-			insert_symbol($1, VAR, vartype, ++var_num, NO_ATR);
+			var_num++;
+			insert_symbol($1, VAR, vartype, var_num, NO_ATR);
 		}
 	| variables_only COMMA ID
 		{
 			// Ista provera i za ovu alternativu
-			for(int i = current_function + 1; i <= get_last_element(); i++){
-				// Mozemo da preskocimo prvi jer je to ustvari funkcija
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $3) == 0){
 					err("Variable or parameter by the name '%s' already exists.\n", $3);
 				}
 			}
-			insert_symbol($3, VAR, vartype, ++var_num, NO_ATR);
+			var_num++;
+			insert_symbol($3, VAR, vartype, var_num, NO_ATR);
 		}
 	;
 
@@ -337,16 +354,9 @@ function_call
 argument_list
 	: /* empty */
 		{
-			// current_function nije ono sto nam treba, treba da nadjemo atr1 (broj parametara) funkcije koje pozivamo
-			// To radimo tako sto idemo od trenutne funkcije u tabeli simbola na gore i gledamo atr1 od simbola funkcije koju pozivamo
-			// Ili samo uzmemo fcall_idx koji bas za to sluzi
-			for(int j = current_function; j > FUN_REG; j--){ // FUN_REG je makro za 13
-				//int argument = lookup_symbol(get_name(j), FUN);
-				if(fcall_idx == j){
-					if(get_atr1(fcall_idx) > 0)
-						err("Function doesn't require any arguments.\n");
-				}
-			}
+			// Ako nismo prosledili argumente, moramo da proverimo da li funkcija zapravo zahteva parametre
+			if(get_atr1(fcall_idx) > 0)
+				err("Function requires arguments!\n");
 		}
 	| arguments
 	;
@@ -363,7 +373,7 @@ arguments
 			// Argument u pozivu funkcije moze da bude varijabla i parametar trenutne funkcije, pa njih trazimo
 			// Ne mozemo da trazimo po VAR|PAR po celoj tabeli kao pre jer bi to uzelo i parametre drugih funkcija, tako da moramo samo za trenutnu
 			int flag = 0;
-			for(int j = current_function + 1; j <= get_last_element(); j++){
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				int argument = lookup_symbol(get_name(j), VAR|PAR); 
 				// Treba za else if, ok je ovde da stoji VAR|PAR jer ne moze ispod indeksa funkcije da nadje parametar neke druge
 				if(strcmp(get_name(j), $1) == 0){
@@ -388,7 +398,7 @@ arguments
 		{
 			// Za prvi argument u listi je vec uradio proveru gore, sad radi za ostale
 			int flag = 0;
-			for(int j = current_function + 1; j <= get_last_element(); j++){
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				int argument = lookup_symbol(get_name(j), VAR|PAR); 
 				// Treba za else if, ok je ovde da stoji VAR|PAR jer ne moze ispod indeksa funkcije da nadje parametar neke druge
 				if(strcmp(get_name(j), $3) == 0){
@@ -407,7 +417,9 @@ arguments
 			err("Argument '%s' is not defined.\n", $3);
 		}
 	| literal
+		// TODO:
 	| arguments COMMA literal
+		// TODO:
 	;
 
 if_statement
@@ -456,7 +468,7 @@ increment_statement
 	;
 
 loop
-	: FOR LPAREN TYPE ID ASSIGN literal TO literal RPAREN statement 
+	: FOR LPAREN TYPE ID ASSIGN literal TO literal RPAREN statement // TODO: ne akcija posle statement, i ovde i dole
 	// Mora statement, ne moze statement_list, baca konflikte
 		{
 			// Literal moze da bude i INT i UINT
@@ -489,7 +501,7 @@ switch_statement
 			// Takodje, pamtimo tip te promenljive za proveru u svakom case-u da li je literal dobrog tipa
 			int switcher = 0;
 			int flag = 0;
-			for(int i = current_function + 1; i <= get_last_element(); i++){
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				// Mozemo da preskocimo prvi jer je to ustvari funkcija
 				if(strcmp(get_name(i), $3) == 0){
 					// Nadjen, postavljamo flag za gresku i switcher za tip
