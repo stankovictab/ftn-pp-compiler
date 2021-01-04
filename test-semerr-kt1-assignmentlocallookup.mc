@@ -1,4 +1,4 @@
-//OPIS: assignment local lookup
+//OPIS: assignment local lookup SemErr
 int f(int t, int g) {
 	g = 10;
 	return 2;

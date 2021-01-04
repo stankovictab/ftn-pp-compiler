@@ -1,4 +1,4 @@
-//OPIS: complex call
+//OPIS: 10-2 OK
 int f(int t, unsigned iu, int g, unsigned j) {
 	g = 10;
 	return 2;

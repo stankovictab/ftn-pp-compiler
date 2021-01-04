@@ -14,20 +14,19 @@ Atribut 2 :
 - Za ostale simbole - nije definisano.
 
 Moje izmene :
-Za parametar je atr1 indeks funkcije za koji je (nigde se ne koristi redni broj parametra iz simbola u tabeli (ali ta globalna varijabla jeste bitna ovako)), a atr2 je uvek 0 (zbog provere nivoa, uvek ce biti nivo 0 za parametre)
-Za funkcije atr2 vise nije nista
-Za varijable je atr2 block_level
+Za parametar je atr1 indeks funkcije za koji je (nigde se ne koristi redni broj parametra iz simbola u tabeli (ali ta globalna varijabla jeste bitna ovako)), a atr2, koji predstavlja block_level, je uvek 0 (bitan zbog provere nivoa, uvek ce biti 0 za parametre).
+Za funkcije atr2 vise nije nista, jer tipove parametara pamtimo u tabeli simbola.
+Za varijable je atr2 block_level.
+
+symtab.c i symtab.h nisu opste menjani. defs.h jeste menjan, dodat je samo VOID kao tip. TODO: Prosiri posle
+Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr, 
+ne menja se nista u symtab.h i symtab.c.
 */
 
-// Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr, ne menja se nista u symtab.h i .c
+// TODO: Izvrsavanje na pdf-u je ustvari GK (valjda?)
+// TODO: //RETURN: za GK za sve moje testove
 
-// Svaki svoj test do sad moram da napravim sa opisom i return-om za GK
-
-// TODO: Izvrsavanje koda na pdf-u je ustvari GK (valjda?)
-
-// TODO: Sve provere za postojanje varijabli sto mora da gleda nivoe mora da se radi i u switch-u
-
-// TODO: Za GK u for-u mora da se proveri na pocetku iteracije da li je iterator manji od kraja, i da se uveca za 1 ili za step na kraju iteracije
+// == block_level se stavlja kada se radi definisanje, a <= kada se radi provera da li postoji promenljiva (varijabla ili parametar)
 
 %{
 	#include <stdio.h>
@@ -35,6 +34,9 @@ Za varijable je atr2 block_level
 	#include "defs.h"
 	#include "symtab.h"
 	#include <string.h> // Za strcmp
+
+	#define ARRAY_LIMIT 100
+	#define INT_MIN -2147483648
 
 	int yyparse(void);
 	int yylex(void);
@@ -55,15 +57,12 @@ Za varijable je atr2 block_level
 	int parameter_number = 0; // Brojac parametara pri definisanju funkcije, potreban za atr1 funkcije u tabeli simbola
 	int argument_number = 0;
 	int block_level = 0; // Brojac nivoa za ugnjezdene blokove koda (atr2 kod VAR-ova)
-	int initial_var_num_before_loop = 0; // Promenljiva potrebna za brisanje sadrzaja tabele simbola nakon zavrsetka iteracije TODO: BRisi
-	// Stek sa indeksima varijabli koje su inicijalizovane u definicijama iteracija, potreban za brisanje simbola iz tabele na kraju loop-a (i njegov indekser)
-	int stack_of_loop_starts_indexes [100] = {0};
+	int stack_of_loop_starts_indexes [ARRAY_LIMIT] = {0}; // Stek sa indeksima varijabli koje su inicijalizovane u definicijama iteracija, potreban za brisanje simbola iz tabele na kraju loop-a
 	int stack_indexer = -1;
-
 	int loop_transferring_type = 0; // (NO_TYPE)
 	unsigned switch_type = 0; // unsigned je jer get_type vraca unsigned
-	int switch_number = 0;
-	int switch_array[100] = {-2147483648}; // Sve se inicijalizuje na INT_MIN, niz se koristi za proveru vec koriscenih literala u switch_statement
+	int switch_array[ARRAY_LIMIT]; // Niz literala trenutnog switch-a za proveru koriscenih (ne moze ovde sve da se inicijalizuje na INT_MIN, nego mora u switch-u)
+	int switch_array_indexer = 0;
 %} 
 
 %union {
@@ -101,7 +100,6 @@ Za varijable je atr2 block_level
 %token LSQUAREBRACKET
 %token RSQUAREBRACKET
 
-// Ovde arguments umesto argument
 %type <i> num_exp exp literal function_call arguments rel_exp
 
 %nonassoc ONLY_IF
@@ -206,7 +204,7 @@ parameter
 			// Gledamo od indeksa funkcije do kraja tabele, jer varijabli nema
 			// Ne ubrajamo simbol funkcije za slucaj int foo(unsigned foo){...}
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $2) == 0){
+				if(strcmp(get_name(j), $2) == 0){ // Provera za block_level nema smisla ovde
 					err("Redifinition of parameter '%s'.\n", $2);
 				}
 			}
@@ -248,15 +246,14 @@ variables_only
 			// Pri deklarisanju varijable trebamo da proverimo da li vec u toj trenutnoj funkciji postoje varijable ili parametri sa tim imenom
 			// To znaci da varijabla moze imati isto ime kao neka prethodna funkcija ili njeni parametri
 			// Ne mozemo da gledamo po lookup_symbol(VAR|PAR) jer to gleda celu tabelu (od nazad pa do 13. registra (FUNREG)) 
-			// To pravi problem zbog parametara, jer se oni ne brisu na kraju funkcije
+			// To pravi problem zbog parametara, jer se oni ovde ne brisu iz tabele na kraju funkcije
 			// Idemo od indeksa funkcije u kojoj je deklarisana varijabla (fun_idx) do kraja tabele
 			// Ne gledamo sam simbol funkcije jer lokalna varijabla moze da ima isto ime kao njena funkcija
 			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku, ako ne nadje isto ime dodajemo
 			// Za tip varijable koristimo vartype koji je postavljen u variables_def_line
 			// Takodje dodajemo proveru za nivo bloka, vidi compound_statement
-
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
-				if(strcmp(get_name(i), $1) == 0 && get_atr2(i) == block_level){
+				if(strcmp(get_name(i), $1) == 0 && get_atr2(i) == block_level){ // Mora == kada definisemo varijablu
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $1);
 				}
 			}
@@ -287,9 +284,9 @@ statement
 	| function_call SEMICOLON
 	| if_statement
 	| return_statement
-	| increment_statement // a++;
+	| increment_statement
 	| loop
-	| switch_statement // Ovime ne sprecavamo switch u switch-u, mada se to nece ni pregledati
+	| switch_statement
 	;
 
 // Svaki compound_statement se razlikuje po svom nivou, koji je atr2 kod njegovih lokalnih varijabli
@@ -305,7 +302,7 @@ compound_statement
 			// Na pocetku novog bloka se povecava brojac (prvi novi blok ce biti nivoa 1)
 			block_level++;
 		}
-	variable_list statement_list RCURLYBRACKET // Ovo je zapravo body, razdvojen zbog semantike (mozda dodje do konflikta?)
+	variable_list statement_list RCURLYBRACKET // Ovo je zapravo body, razdvojen zbog semantike (mozda dodje do konflikta? ali nece zbog ove akcije gore?)
 		{
 			// Brisemo sve novodefinisane varijable (da bi vratili vrednost starima sa istim imenom)
 			// Nadjemo prvi simbol sa trenutnim block_level-om i brisemo sve ispod njega (ukljucujuci i literale)
@@ -323,7 +320,7 @@ assignment_statement
 		// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
 		int idx = NO_INDEX;
 		for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom
+				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
 					idx = lookup_symbol(get_name(j), VAR|PAR); 
 					// Iako lookup_symbol() radi sa get_name(), on nece uzeti neki var u novom bloku, 
 					// jer se ipak gleda po tom j koji je prosao gornji uslov, tako da ce uvek uzeti dobar var
@@ -354,7 +351,7 @@ exp
 			// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
 			int idx = NO_INDEX;
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom
+				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
 					idx = lookup_symbol(get_name(j), VAR|PAR); // Semanticka vrednost exp-a sa ID-em je indeks ID-a u tabeli simbola
 			}
 			if(idx == NO_INDEX)
@@ -490,7 +487,7 @@ increment_statement
 			// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
 			int idx = NO_INDEX;
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom
+				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
 					idx = lookup_symbol(get_name(j), VAR|PAR);
 			}
 			if(idx == NO_INDEX)
@@ -498,18 +495,12 @@ increment_statement
 		}
 	;
 
-// TODO: NOVO - UZMI INDEKS OD PRVOG LITERALA (samo $6) U FORU I SVE ODATLE OBRISI, NIKAKVI -3 I -2 BAKRACI
-// E sad, ako se stavi u ugnjezdenom for-u neki isti literal, uzece indeks onog prethodnog pa ce obrisati vise nego sto treba, to nije dobro
-// Tako da moramo obelezavati dubinu literala za for-ove da bi se literal ubacao jednoznacno u tabelu simbola, da iako ima isto ime (vrednost)
-// ima razlicit atr1, pa se nece obrisati od pogresnog literala na kraju for-a, nego od bas tog iz tog for-a
-
-// TODO: Za ovo gore moram da menjam funkcije u symtab.c
-// A sta ako se potrudim da prvo ubacim ovaj ID u tabelu, pa da od njega brisem?
-// Za to moram da menjam pravila tako da izbegnem konflikt
-
+// loop sam odvojio u 2 dela da bih prvo ID ubacio u tabelu simbola, pa tek onda literale, zbog kasnijeg oslobadjanja tabele simbola,
+// jer je mnogo lakse kada znam tacno od kog indeksa pocinje loop, da bih kasnije sa stekom indeksa tih ID-eva lakse oslobodio
 loop
 	: loop_first_part loop_second_part 
-		{ 
+		{
+			// Kraj loop-a, bilo da je ugnjezden ili ne
 			loop_transferring_type = 0; // Reset
 			// Brisanje simbola za loop iz tabele preko steka
 			clear_symbols(stack_of_loop_starts_indexes[stack_indexer]);
@@ -523,11 +514,10 @@ loop_first_part
 		{
 			loop_transferring_type = $3;
 			// TODO: Obrati paznju za GK da se ovde zapravo desava dodela
-
 			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji
 			// Prekopirano iz variables_only, prva alternativa, samo zamenjeno $n
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
-				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){
+				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){ // Mora == zbog toga kako radi loop (pokriva i parametre)
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $4);
 				}
 			}
@@ -538,7 +528,7 @@ loop_first_part
 	;
 
 loop_second_part
-	: literal TO literal RPAREN // Mora ovde akcija, ako je pre javlja se konflikt sa donjom alternativom
+	: literal TO literal RPAREN  // Mora ovde akcija, ako je pre javlja se konflikt sa donjom alternativom
 		{
 			// Razlog zasto razdavajamo ovde je da bi se iz tabele simbola (u sledecoj akciji) brisali i literali iz inicijalizacije iteracije
 			if(loop_transferring_type != get_type($1)
@@ -552,7 +542,7 @@ loop_second_part
 			if(lit1 >= lit2)
 				err("Start of the loop isn't smaller than the end.\n");
 		} 
-	statement // Nema akcije posle statement-a, vidi akciju u loop-u
+	statement // Nema akcije posle statement-a, vidi akciju u loop-u (ne moze statement pre ove akcije)
 	| literal TO literal STEP literal RPAREN 
 		{
 			if(loop_transferring_type != get_type($1)
@@ -575,54 +565,56 @@ loop_second_part
 		}
 	statement
 	;
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Ovakvim switch-om ne onemogucujemo switch u switch-u, mada se to nece ni pregledati
+// Moze da se napise switch[a] pa opet switch[a], to je podrzano
 switch_statement
 	: SWITCH LSQUAREBRACKET ID 
 		{
+			// Postavljanje svakog elementa na INT_MIN da case 0 ne baci gresku
+			// Ovo ce i resetovati niz i indekser sa svaki switch, ne mora da se radi u poslednjoj akciji
+			for(int i = 0; i < ARRAY_LIMIT; i++)
+				switch_array[i] = INT_MIN;
+			switch_array_indexer = 0;
+
 			// Provera da li je ID po kojem se radi switch vec definisana promenljiva, ako jeste ok je
-			// Takodje, pamtimo tip te promenljive za proveru u svakom case-u da li je literal dobrog tipa
-			int switcher = 0;
+			// Takodje, pamtimo tip te promenljive za proveru u svakom case-u, da li je literal dobrog tipa
 			int flag = 0;
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
-				// Mozemo da preskocimo prvi jer je to ustvari funkcija
-				if(strcmp(get_name(i), $3) == 0){
-					// Nadjen, postavljamo flag za gresku i switcher za tip
+				if(strcmp(get_name(i), $3) == 0 && get_atr2(i) <= block_level){ // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
+					// Postoji, postavljamo tip i flag za gresku
 					flag = 1;
-					switcher = i;
+					switch_type = get_type(i);
 				}
 			}
 			if(flag == 0) err("Variable or parameter '%s' in switch statement not defined.\n", $3);
-			switch_type = get_type(switcher);
-			// Vracamo za sledeci switch
-			for(int i = 0; i < 100; i++)
-				switch_array[i] = -2147483648;
-			// TODO: Deo za izvrsavanje je za sledecu tacku
 		}
 		RSQUAREBRACKET LCURLYBRACKET case_list otherwise_optional RCURLYBRACKET
 	;
 
 case_list
 	: CASETOKEN literal {
-		// Posto bi $2 bio indeks u tabeli, moramo lookup_symbol da dobijemo vrednost
-		// get_type($2) bi vratilo tip literala, jer je $2 indeks
-		
 		if(get_type($2) != switch_type)
 			err("Type of literal not the same as type of switcher.\n");
 
-		for(int i = 0; i < 100; i++){
+		for(int i = 0; i < ARRAY_LIMIT; i++){
 			if (switch_array[i] == atoi(get_name($2)))
 				err("Literal already in use in switch statement.\n");
 		}
-
-	} ARROW statement finish_optional
+		// Provere su ok, literal moze da se ubaci
+		switch_array[switch_array_indexer] = atoi(get_name($2));
+		switch_array_indexer++;
+	} ARROW statement finish_optional // finish; ne moze po zadatku da se stavi unutar statement-a, tako da mora van viticastih
 	| case_list CASETOKEN literal {
 		if(get_type($3) != switch_type)
 			err("Type of literal not the same as type of switcher.\n");
 
-		for(int i = 0; i < 100; i++){
+		for(int i = 0; i < ARRAY_LIMIT; i++){
 			if (switch_array[i] == atoi(get_name($3)))
 				err("Literal already in use in switch statement.\n");
 		}
+		switch_array[switch_array_indexer] = atoi(get_name($3));
+		switch_array_indexer++;
 	} ARROW statement finish_optional
 	;
 

@@ -1,4 +1,4 @@
-//OPIS: 7 & 9 test
+//OPIS: 7 & 9 SemErr
 // f i main nemaju return, izbaca 2 upozorenja
 int f(int c) {
 	f++; // Ovo treba da kaze da nije deklarisano jer trazi samo VAR|PAR, izbaca gresku

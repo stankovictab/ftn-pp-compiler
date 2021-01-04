@@ -1,4 +1,4 @@
-//OPIS: same parameters
+//OPIS: 10-3 OK
 int f(int t, unsigned oo, int o, unsigned j) {
 	return 2;
 }

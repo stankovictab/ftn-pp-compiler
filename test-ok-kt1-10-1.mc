@@ -1,4 +1,4 @@
-//OPIS: 9 & 10 test
+//OPIS: 10-1 OK
 int f(int c) {
 	int a;
 	return a;
