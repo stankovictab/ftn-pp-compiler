@@ -18,9 +18,10 @@ Za parametar je atr1 indeks funkcije za koji je (nigde se ne koristi redni broj 
 Za funkcije atr2 vise nije nista, jer tipove parametara pamtimo u tabeli simbola.
 Za varijable je atr2 block_level.
 
-symtab.c i symtab.h nisu opste menjani. defs.h jeste menjan, dodat je samo VOID kao tip. TODO: Prosiri posle
-Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr, 
-ne menja se nista u symtab.h i symtab.c.
+symtab.h nije menjan.
+symtab.c je menjan, mora da se stavi "GVAR" u symbol_kinds u print_symtab() jer stavlja (null) umesto GVAR u tabeli.
+defs.h je menjan, dodat je samo VOID kao tip.
+Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr.
 */
 
 // TODO: Izvrsavanje na pdf-u je ustvari GK (valjda?)
@@ -28,12 +29,25 @@ ne menja se nista u symtab.h i symtab.c.
 
 // == block_level se stavlja kada se radi definisanje, a <= kada se radi provera da li postoji promenljiva (varijabla ili parametar)
 
+// Posto ne moze da se stavi int main = 3; iznad int main(), to znaci da za GVAR moramo da proveravamo i FUN pored GVAR-ova (tako je u C-u)
+
+// TODO: Gvar u ostalim pojmovima da se stavi, svuda gde treba da se proverava da li i takva promenljiva moze. Obrati paznju da VAR ima prednost nad GVAR u funkciji ako oni imaju isto ime, tako da prvo treba provera za VAR, pa onda za GVAR ako ne nadje simbol.
+
+// TODO: GVAR provera da se stavi i u mojim pojmovima, pa testovi
+
+// TODO: Vidi cemu sluzi free_if_reg() svuda
+
+// TODO: Testiraj test-temp i vidi zasto ne ispisuje argumente pre CALL-a dobro
+
+// TODO: Objasni if GK sve
+
 %{
 	#include <stdio.h>
 	#include <stdlib.h>
 	#include "defs.h"
 	#include "symtab.h"
 	#include <string.h> // Za strcmp
+	#include "codegen.c" // KT2, mora .c iz nekog razloga kod mene (greska undefined reference, ne ubaci .c kada ubacim .h??)
 
 	#define ARRAY_LIMIT 100
 	#define INT_MIN -2147483648
@@ -63,6 +77,14 @@ ne menja se nista u symtab.h i symtab.c.
 	unsigned switch_type = 0; // unsigned je jer get_type vraca unsigned
 	int switch_array[ARRAY_LIMIT]; // Niz literala trenutnog switch-a za proveru koriscenih (ne moze ovde sve da se inicijalizuje na INT_MIN, nego mora u switch-u)
 	int switch_array_indexer = 0;
+
+	// KT2
+	int out_lin = 0;
+	int lab_num = -1;
+	FILE *output; // Vidi main() skroz dole, tu se inicijalizuje
+
+	int argument_pusher_array[ARRAY_LIMIT]; // Niz indeksa registra koji imaju vrednosti num_exp-ova koji se prosledjuju u pozivu funkcije, da bi mogao da argumente push-ujem na stackframe u obrnutom redosledu
+	int argument_pusher_indexer = 0; // TODO: Brisi?
 %} 
 
 %union {
@@ -100,7 +122,8 @@ ne menja se nista u symtab.h i symtab.c.
 %token LSQUAREBRACKET
 %token RSQUAREBRACKET
 
-%type <i> num_exp exp literal function_call arguments rel_exp
+// Ovde arguments, argument_list i if_part
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -108,12 +131,33 @@ ne menja se nista u symtab.h i symtab.c.
 %%
 
 program
-	: function_list
+	: global_list function_list // Prvo globalne pa onda funkcije
 		{  
 			// Javlja gresku ako main() uopste ne postoji u tabeli simbola
 			if(lookup_symbol("main", FUN) == NO_INDEX)
 				err("Undefined reference to 'main'.\n");
 		 }
+	;
+
+global_list
+	: /*empty*/
+	| global_list global_var
+	;
+
+global_var
+	: TYPE ID SEMICOLON
+	{
+		// Dodatna provera, ne mogu globalne promenljive i funkcije da imaju isto ime (ne moze int main; iznad int main(){}), ali moze da se trazi po celoj tabeli
+		int idx = lookup_symbol($2, GVAR|FUN); 
+		if (idx != NO_INDEX) 
+		{
+				err("Global variable or function by the name '%s' already exists.", $2);
+		} else {
+			insert_symbol($2, GVAR, $1, NO_ATR, -1); // block_level za globalne promenljive je -1
+			// Generisanje koda za GVAR
+			code("\n%s:\n\t\tWORD\t1", $2);
+		}
+	}
 	;
 
 function_list
@@ -124,19 +168,23 @@ function_list
 function
 	: TYPE ID
 		{
-			// fun_idx je indeks ove funkcije
-			// Trazimo da li postoji funkcija u tabeli
-			fun_idx = lookup_symbol($2, FUN);
+			// Trazimo da li postoji funkcija ili globalna promenljiva u tabeli sa istim imenom
+			fun_idx = lookup_symbol($2, FUN|GVAR);
 			if(fun_idx == NO_INDEX){
-				// Ako ne postoji funkcija, dodaj je, bez atributa (atr2 vise nije tip (jedinog) parametra)
-				fun_idx = insert_symbol($2, FUN, $1, NO_ATR, NO_ATR);
+				// Ako ne postoji, dodaj je, uz inicijalizovanje broja parametara na 0 (tek treba da se puni) (atr2 vise nije nista za funkcije)
+				fun_idx = insert_symbol($2, FUN, $1, 0, NO_ATR);
 				}
 			else 
 				err("Redefinition of function '%s'.\n", $2);
+
+			// Postavljanje labele za funkciju, frame pointer-a i stack pointer-a
+			code("\n%s:", $2);
+        	code("\n\t\tPUSH\t%%14");
+        	code("\n\t\tMOV \t%%15,%%14");
 		}
 	LPAREN parameters_full 
 		{
-			// Kada analiziramo sve parametre, update-ujemo broj parametra za simbol funkcije
+			// Kada analiziramo sve parametre, update-ujemo broj parametra za simbol funkcije (mada ovo i nema neku svrhu da se postavlja)
 			set_atr1(fun_idx, parameter_number);
 		}
 	RPAREN body
@@ -145,6 +193,7 @@ function
 			// clear_symbols brise od ovog indeksa pa na dole, pa ce nam ostati samo parametri
 			int var_start_index = fun_idx + parameter_number + 1;
 			clear_symbols(var_start_index);
+			// Resetujemo var_num za sledece funkcije
 			var_num = 0;
 			// Non-void funkcije moraju imati povratnu vrednost, pa koristimo flag da proverimo da li smo ga iskoristili
 			if(return_flag == 0)
@@ -153,15 +202,25 @@ function
 			return_flag = 0;
 			// Resetujemo broj parametra za nove funkcije
 			parameter_number = 0;
+
+			// Izlaz iz funkcije - exit labela, "brisanje" stackframe-a i ret
+			code("\n@%s_exit:", $2);
+			code("\n\t\tMOV \t%%14,%%15"); // Podizemo %esp
+			code("\n\t\tPOP \t%%14"); // Resetujemo %ebp
+			code("\n\t\tRET"); // Povratnu adresu stavljamo u PC
 		}
 	| VOIDTYPE ID
 		{
 			fun_idx = lookup_symbol($2, FUN);
 			if(fun_idx == NO_INDEX){
-				fun_idx = insert_symbol($2, FUN, $1, NO_ATR, NO_ATR);
+				fun_idx = insert_symbol($2, FUN, $1, 0, NO_ATR);
 			}
 			else 
 				err("Redefinition of function '%s'.\n", $2);
+
+			code("\n%s:", $2);
+        	code("\n\t\tPUSH\t%%14");
+        	code("\n\t\tMOV \t%%15,%%14");
 		}
 	LPAREN parameters_full 
 		{
@@ -175,14 +234,16 @@ function
 			// Jedina razlika u odnosu na gornju alternativu je sto ovde ne proveravamo return_flag kao gore jer void funkcije nemaju povratnu vrednost
 			return_flag = 0;
 			parameter_number = 0;
+
+			code("\n@%s_exit:", $2);
+			code("\n\t\tMOV \t%%14,%%15");
+			code("\n\t\tPOP \t%%14");
+			code("\n\t\tRET");
 		}
 	;
 
 parameters_full
 	: /* empty */
-		{
-			set_atr1(fun_idx, 0);
-		}
 	| parameters
 	/*  Moramo da razdvojimo parametre u 3 dela (3 pojma) zbog rekurzije.
 		Da smo pisali u 2 bilo bi
@@ -208,16 +269,22 @@ parameter
 					err("Redifinition of parameter '%s'.\n", $2);
 				}
 			}
-			// Za svaki parametar koji prodje moramo da povecamo broj parametara za atr1 funkcije
+			// Za svaki parametar koji prodje moramo da povecamo broj parametara za update-ovanje atr1 funkcije
 			parameter_number++;
-			// Pri ubacivanju se postavlja indeks funkcije za koji je, kao i nivo, koji je uvek 0
-			// Moramo da postavljamo taj nivo zbog kasnije provere u operacijama
+			// Pri ubacivanju parametra, postavlja mu se indeks funkcije za koji je, kao i nivo, koji je uvek 0 (sluzi za kasniju proveru u operacijama)
 			insert_symbol($2, PAR, $1, fun_idx, 0);
 		}
 	;
 
 body
-	: LCURLYBRACKET variable_list statement_list RCURLYBRACKET
+	: LCURLYBRACKET variable_list 
+		{
+			// Ako je bilo promenljivih definisano u funkciji, napravi mesta za njih na stackframe-u (pomeri %esp na dole) i napravi labelu za statement-e
+			if(var_num)
+				code("\n\t\tSUBS\t%%15,$%d,%%15", 4*var_num);
+			code("\n@%s_body:", get_name(fun_idx));
+		}
+	statement_list RCURLYBRACKET
 	;
 
 // variable_list moze da ima vise linija definicija, gde svaka linija moze da ima ili jednu ili vise varijabli
@@ -251,7 +318,7 @@ variables_only
 			// Ne gledamo sam simbol funkcije jer lokalna varijabla moze da ima isto ime kao njena funkcija
 			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku, ako ne nadje isto ime dodajemo
 			// Za tip varijable koristimo vartype koji je postavljen u variables_def_line
-			// Takodje dodajemo proveru za nivo bloka, vidi compound_statement
+			// Takodje dodajemo proveru za nivo bloka, da na trenutnom nivou ne moze da se definise promenljiva koja je tu vec definisana (bitno je da je definisana, a ne koja tu samo postoji, vidi compound_statement)
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $1) == 0 && get_atr2(i) == block_level){ // Mora == kada definisemo varijablu
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $1);
@@ -317,18 +384,24 @@ compound_statement
 assignment_statement
 	: ID ASSIGN num_exp SEMICOLON
 		{
-		// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
 		int idx = NO_INDEX;
+		// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+		// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
 		for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
+				// TODO: NE IDE OVDE PROVERA <= BLOCKLEVEL JER SE ONI BRISU, ISPRAVI OVDE I SVUDA GDE TREBA
 					idx = lookup_symbol(get_name(j), VAR|PAR); 
 					// Iako lookup_symbol() radi sa get_name(), on nece uzeti neki var u novom bloku, 
 					// jer se ipak gleda po tom j koji je prosao gornji uslov, tako da ce uvek uzeti dobar var
 			}
 		if(idx == NO_INDEX)
-			err("Invalid lvalue '%s' in assignment.\n", $1);
+			idx = lookup_symbol($1, GVAR);
+		if(idx == NO_INDEX)
+			err("Local or global variable or parameter by the name '%s' in assignment doesn't exist.\n", $1);
 		else if(get_type(idx) != get_type($3))
 			err("Incompatible types in assignment.\n");
+		// Generisanje koda za dodelu - vrednost num_exp-a ide u ID
+		gen_mov($3, idx);
 		}
 	;
 
@@ -336,29 +409,55 @@ num_exp
 	: exp
 	| num_exp AROP exp
 		{
-			// Tip num_exp-a je tip vrednosti koju taj izraz daje, a taj tip je nasledjen od exp-a
+			// Semanticka vrednost num_exp-a je indeks registra u kojem se nalazi njegova vrednost
+			// Tip num_exp-a je tip vrednosti koju taj izraz daje, a taj tip je nasledjen od exp-a, i stavljen je kao tip tog registra koji ima njegovu vrednost
 			// Zna se i tip poziva funkcije (povratne vrednosti) iz toga sto je semanticka vrednost function_call-a indeks funkcije, 
 			// pa ce tu semanticku vrednost imati i exp, pa ce get_type($3) uzeti tacan tip iz simbola kind-a FUN
 			if(get_type($1) != get_type($3))
 				err("Invalid operands: arithmetic operation (incompatible types).\n");
+			int type = get_type($1);
+			// num_exp ce biti npr ADDS %1, %3, %4
+			// biramo aritmeticku operaciju na osnovu parsiranog AROP-a i tipa num_exp-a - $2 je vrsta operacije (ADD ili SUB), a ovaj proizvod je ili 0 ili 4 (AROP_NUMBER je makro za 4) i bira signed ili unsigned verziju operacije (ima 4 zbog MUL i DIV)
+			code("\n\t\t%s\t", ar_instructions[$2 + (type - 1) * AROP_NUMBER]);
+			// Operandi
+			gen_sym_name($1); // Ovo je valjda uvek registar
+			code(",");
+			gen_sym_name($3); // Ovo ne mora da bude registar
+			code(",");
+			// Ovo je nebitno
+			free_if_reg($3);
+			free_if_reg($1);
+			$$ = take_reg(); // Semanticka vrednost je indeks registra sa rezultatom
+			gen_sym_name($$); // Generise asm kod za taj registar kao rezultat operacije
+			set_type($$, type); // Postavljamo tip registra koji sadrzi vrednost num_exp-a na tip samog num_exp-a
 		}
 	;
 
+// Semanticka vrednost exp-a je indeks toga u tabeli simbola (ili indeks literala ili varijable, ili registra u kojem je povratna vrednost poziva funkcije, ili sta god je sem vrednost num_exp-a u zagradi (vidi pojam)
+// Takodje, tip exp-a je tip toga sta je redukovao
 exp
 	: literal
 	| ID increment_optional
 		{
-			// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
 			int idx = NO_INDEX;
+			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
 					idx = lookup_symbol(get_name(j), VAR|PAR); // Semanticka vrednost exp-a sa ID-em je indeks ID-a u tabeli simbola
 			}
 			if(idx == NO_INDEX)
+				idx = lookup_symbol($1, GVAR);
+			if(idx == NO_INDEX)
 				err("'%s' undeclared.\n", $1);
 			$$ = idx; // Jos u micku se postavljalo
 		}
 	| function_call
+		{
+			// Kada pozivamo funkciju zelimo da njenu povratnu vrednost prebacimo u registar opste namene
+			$$ = take_reg(); // Zauzima se registar opste namene
+			gen_mov(FUN_REG, $$); // Prebaca se iz %13 u taj registar
+		}
 	| LPAREN num_exp RPAREN
 		{ $$ = $2; /* exp nasledjuje semanticku vrednost num_exp-a u zagradi */ }
 	;
@@ -383,22 +482,48 @@ function_call
 			fcall_idx = lookup_symbol($1, FUN); 
 			if(fcall_idx == NO_INDEX)
 				err("'%s' is not a function.\n", $1);
+
+			// Reset niza na pocetku poziva
+			for(int i = 0; i < ARRAY_LIMIT; i++)
+				argument_pusher_array[i] = INT_MIN;
 		}
 	LPAREN argument_list RPAREN
 		{
-			// function_call dobija semanticku vrednost
-			$$ = lookup_symbol($1, FUN);
+			// Ovde je pre pisalo samo $$ = lookup_symbol($1, FUN);
+			
+			// Semanticka vrednost pojma argument_list je broj argumenata u pozivu
+			// TODO: OVDE NIKAD NECE UCI, VEC IMAM TE PROVERE
+			if(get_atr1(fcall_idx) != $4)
+         		err("Wrong number of arguments passed to function '%s'.\n", get_name(fcall_idx));
+
+			// Generisanje koda za argumente - push-ujemo ih na stackframe u obrnutom redosledu, mora pre CALL-a
+			for(int i = argument_number - 1; i >= 0; i--){
+				free_if_reg(argument_pusher_array[i]);
+				code("\n\t\t\tPUSH\t");
+				gen_sym_name(argument_pusher_array[i]); // Generisace asm kod za registar u kojem je vrednost num_exp-a
+			}
+
+			// Pravi se poziv uz ime funkcije, koje ce biti labela
+			code("\n\t\t\tCALL\t%s", get_name(fcall_idx));
+			// Nakon poziva, kada funkcija zavrsi sa radom, moramo da izbrisemo mesta za argumente koji su joj prosledjeni (ovaj if nije ni potreban)
+			if($4 > 0)
+				code("\n\t\t\tADDS\t%%15,$%d,%%15", $4 * 4);
+			set_type(FUN_REG, get_type(fcall_idx)); // Postavlja tip za %13
+			$$ = FUN_REG; // Semanticka vrednost poziva je uvek 13
 		}
 	;
 
 // Mora da se doda kao poseban pojam da ne bi proslo nesto kao
 // b = f(,a,c);
+// Semanticka vrednost pojma argument_list je broj argumenata u pozivu
 argument_list
 	: /* empty */
 		{
 			// Ako nismo prosledili argumente, moramo da proverimo da li funkcija zapravo zahteva parametre
 			if(get_atr1(fcall_idx) > 0)
 				err("Function '%s' requires arguments!\n", get_name(fcall_idx));
+			// Ako je tacno 0, onda postavljamo semanticku vrednost kao broj argumenata
+			$$ = 0;
 		}
 	| arguments
 		{
@@ -408,9 +533,11 @@ argument_list
 				err("Too few arguments passed to function '%s'.\n", get_name(fcall_idx));
 			else if(get_atr1(fcall_idx) < argument_number)
 				err("Too many arguments passed to function '%s'.\n", get_name(fcall_idx));
-			else
-				// Tacan broj argumenata, resetujemo za sledeci poziv
+			else{
+				// Tacan broj argumenata, postavljamo semanticku vrednost i resetujemo za sledeci poziv
+				$$ = argument_number;
 				argument_number = 0;
+			}
 		}
 	;
 
@@ -429,10 +556,13 @@ za to bi morao da pravim niz dubina poziva funkcija, gde svaka dubina ima svoj a
 arguments
 	: num_exp
 		{
-			// Cim nadje jedan parametar radice ovu proveru, ako nadje vise nastavice u sledecoj alternativi
+			// Cim nadje jedan parametar radice ovu proveru, a ako nadje vise nastavice u sledecoj alternativi
 			argument_number = 1;
-			if(get_type(fcall_idx + argument_number) != get_type($1)) // get_type() za num_exp radi, a radice i u GK zbog indeksa registra sa tipom
+			// get_type() za num_exp radi, a radice i u GK zbog indeksa registra sa tipom
+			if(get_type(fcall_idx + argument_number) != get_type($1)) 
         		err("Forwarded argument '%s' of wrong type.\n", get_name($1));
+			// Punimo niz indeksa registra num_exp-ova koji su za PUSH na stackframe u obrnutom redosledu (mora -1 jer pocinje od 1)
+			argument_pusher_array[argument_number - 1] = $1;
 		}
 	| arguments COMMA num_exp
 		{
@@ -441,23 +571,60 @@ arguments
 			if(get_type(fcall_idx + argument_number) != get_type($3)){
         		err("Forwarded argument '%s' of wrong type.\n", get_name($3));
 			}
+			argument_pusher_array[argument_number - 1] = $3;
 		}
 	;
 
+// Postavljen je prioritet na ELSE alternativu
 if_statement
 	: if_part %prec ONLY_IF
-	| if_part ELSE statement
+		{
+			// Na kraju parsiranja celog if_statement-a mora da se napravi labela za izlazak iz if-a, zbog skoka iz druge labele na tu labelu - moramo da stavimo broj labele, a to cemo dobiti iz semanticke vrednosti if_part-a, sto je ustvari broj labele za taj nivo if-a (u ugnjezdenim if-ovima)
+			code("\n@exit%d:", $1);
+		}
+	| if_part ELSE statement // Ovaj statement ce generisati asemblerski kod za ELSE alternativu if-a, odnosno za telo false grane if-a, i to ce pisati u vec napravljenoj labeli za false granu (vidi dole)
+		{
+			code("\n@exit%d:", $1);
+		}
 	;
 
 if_part
-	: IF LPAREN rel_exp RPAREN statement
+	: IF LPAREN 
+		{
+			// Prva labela je za uslov u zagradama, pravimo labelu uz lab_num
+			$<i>$ = ++lab_num; // Bio je na -1 da bi "stablo ugnjezdenih if-ova" pocelo od nulte labele
+        	code("\n@if%d:", lab_num);
+		}
+	rel_exp // rel_exp generise CMP instrukciju za prvu labelu (vidi dole)
+		{
+			// $<i>3 je trenutni lab_num, za taj nivo if-a, odnosno semanticka vrednost prve akcije
+			// Koristimo ga ovako a ne preko lab_num jer ce se lab_num menjati kako pravimo if-ove u if-u
+			// Znaci ovako ce sigurno ta semanticka vrednost da ostane na istom nivou ($<i>$ je lokalno samo za trenutni pojam, a lab_num je globalna vrednost)
+			// lab_num se nigde ne resetuje, tako da ako imamo jednom neke if u if-u u if-u itd, ako izadjemo iz svega toga i ponovo imamo neki if, on nece biti prvi, nego npr sesti (kao sto i treba, ako se resetuje lab_num, onda ce se simulator vracati na pogresan if gore cak, a treba da ide dole)
+			// opp_jumps je opposite jumps, i mi koristimo tu enumeraciju jer sa CMP-om hocemo da idemo na false granu if-a, znaci gledamo suprotan uslov
+			code("\n\t\t%s\t@false%d", opp_jumps[$4], $<i>3); // Uslovni skok na false labelu
+			// Zna se koji ce se tip skoka koristiti na osnovu rel_exp-a i njegove semanticke vrednosti, a semanticka vrednost rel_exp-a je indeks odgovarajuceg uskovnog skoka u enumeraciji, vidi dole
+			code("\n@true%d:", $<i>3);
+		}
+	RPAREN statement // Ovaj statement ce generisati svoj asemblerski kod za telo true grane if-a, cak iako je to ponovo neki if_statement
+		{
+			code("\n\t\tJMP \t@exit%d", $<i>3); // Bezuslovni skok na kraj na kraju true grane if-a
+			code("\n@false%d:", $<i>3); // Ova labela ce za ONLY_IF alternativu postojati, ali ce biti prazna, pa je napravljena za drugu alternativu, da bi ona mogla samo tu da nastavi sa onim njenim statement-om
+			$$ = $<i>3; // Da bi napravili exit labelu treba nam broj labele za trenutni nivo if-a, pa koristimo semanticku vrednost if_part-a za to (a to se koristi u alternativama if_statement-a)
+		}
 	;
 
 rel_exp
 	: num_exp RELOP num_exp
 		{
 			if(get_type($1) != get_type($3))
-				err("Invalid operands: relational operator.\n");
+				err("Invalid operands in relational operator.\n");
+       		// $2 daje jednu od onih 6 standardnih relop-a
+			// Moramo da gledamo tip operanda da bi znali koji tacno skok da uradimo, da li S ili U
+			// Pa ce ova zagrada desno biti ili 0 (za S) ili 6 (za U) (jer get_type vraca ili 1 ili 2)
+			// Pa ce semanticka vrednost rel_exp-a biti indeks odgovarajuceg uslovnog skoka u enumeraciji
+			$$ = $2 + ((get_type($1) - 1) * RELOP_NUMBER);
+        	gen_cmp($1, $3); // Na primer CMPS %3, %4 (gen_cmp gleda da li su int ili uint pa ce biti ili CMPS ili CMPU)
 		}
 	;
 
@@ -468,9 +635,10 @@ return_statement
 			return_flag = 1;
 			if(get_type(fun_idx) != get_type($2))
 				err("Incompatible types in return.\n");
-
 			if(get_type(fun_idx) == VOID)
 				err("Function of type VOID can't return an expression.\n");
+			gen_mov($2, FUN_REG); // Prebaca u %13 za povratnu vrednost
+			code("\n\t\tJMP \t@%s_exit", get_name(fun_idx)); // JMP na exit labelu za funkciju za "brisanje" stackframe-a
 		}
 	| RETURN SEMICOLON
 		{
@@ -644,19 +812,27 @@ void warning(char *s) {
 int main() {
 	int synerr;
 	init_symtab();
+	output = fopen("output.asm", "w+");
 
 	synerr = yyparse();
 
 	clear_symtab();
+	fclose(output);
 	
 	if(warning_count)
-	printf("\n%d warning(s).\n", warning_count);
+		printf("\n%d warning(s).\n", warning_count);
 
-	if(error_count)
-	printf("\n%d error(s).\n", error_count);
+	if(error_count) {
+		remove("output.asm");
+		printf("\n%d error(s).\n", error_count);
+	}
 
 	if(synerr)
-	return -1; //syntax error
+    	return -1;  //syntax error
+  	else if(error_count)
+		return error_count & 127; //semantic errors
+	else if(warning_count)
+		return (warning_count & 127) + 127; //warnings
 	else
-	return error_count; //semantic errors
+		return 0; //OK
 }

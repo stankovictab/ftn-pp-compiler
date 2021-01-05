@@ -4,6 +4,7 @@
    #include <string.h>
    #include "semantic.tab.h"
    #include "defs.h"
+   extern YYSTYPE yylval; // Dodato u 7. vezbama
 %}
 
 %%
@@ -54,6 +55,7 @@
                        yylval.s[yyleng-1] = 0;
                        return UINT_NUMBER;}
 
+\/\*(.*\n)*.*\*\/	 { /* Viselinijski komentar */ }
 \/\/.*               { /* Jednolinijski komentar */ }
 .                    { printf("line %d: LEXICAL ERROR on char %c\n", yylineno, *yytext);}
 
