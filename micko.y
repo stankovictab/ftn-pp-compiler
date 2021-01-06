@@ -92,6 +92,8 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int stack_indexer = -1;
 	int loop_transferring_type = 0; // (NO_TYPE)
 	int loop_transferring_id = 0;
+	int loop_transferring_first_literal = 0;
+	int loop_transferring_second_literal = 0;
 	unsigned switch_type = 0; // unsigned je jer get_type vraca unsigned
 	int switch_array[ARRAY_LIMIT]; // Niz literala trenutnog switch-a za proveru koriscenih (ne moze ovde sve da se inicijalizuje na INT_MIN, nego mora u switch-u)
 	int switch_array_indexer = 0;
@@ -104,7 +106,9 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int argument_pusher_array[ARRAY_LIMIT]; // Niz indeksa registra koji imaju vrednosti num_exp-ova koji se prosledjuju u pozivu funkcije, da bi mogao da argumente push-ujem na stackframe u obrnutom redosledu
 	int increment_todo_array[ARRAY_LIMIT] = {0}; // Niz indeksa ID-eva koji trebaju da se inkrementuju
 	int increment_array_indexer = 0;
-	int loop_counter = 0; // Za labele for-a
+	int loop_counter = 0; // Za labele for-a TODO: Zasto 1
+	int transferring_second_literal_array[ARRAY_LIMIT] = {0};
+	int transferring_id_array[ARRAY_LIMIT] = {0};
 %} 
 
 %union {
@@ -143,7 +147,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 %token RSQUAREBRACKET
 
 // Ovde arguments, argument_list i if_part
-%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -730,25 +734,50 @@ loop
 	: loop_first_part loop_second_part 
 		{
 			// Kraj loop-a, bilo da je ugnjezden ili ne
+
+			// Semanticka vrednost prvog dela je labela
+			gen_cmp(loop_transferring_id, loop_transferring_second_literal); // Poredi trenutan i i kraj
+			if(get_type(loop_transferring_id) == INT){
+				code("\n\t\tJGES \t@loop_exit%d", $1); // TODO: Da li ovde moze lab_num? Mozda ovo sve mora u ceo loop?
+				code("\n\t\tADDS \t"); 
+				gen_sym_name(loop_transferring_id);
+				code(",$1,"); // TODO: Ovde u drugom slucaju umesto $1 biti step
+				gen_sym_name(loop_transferring_id);
+			}
+			else if(get_type(loop_transferring_id) == UINT){
+				code("\n\t\tJGEU \t@loop_exit%d", $1);
+				code("\n\t\tADDU \t"); 
+				gen_sym_name(loop_transferring_id);
+				code(",$1,"); // TODO: Ovde u drugom slucaju umesto $1 biti step
+				gen_sym_name(loop_transferring_id);
+			}
+			code("\n\t\tJMP \t@loop_start%d", $1); // Skocice ako ne prodje CMP
+			code("\n@loop_exit%d:", $1);
+
 			// Reset
 			loop_transferring_type = 0; 
-			loop_transferring_id = 0; 
+			//loop_transferring_id = 0;
+			loop_transferring_first_literal = 0; // Mozda nepotrebno
+			
+			loop_counter--;
+
+			loop_transferring_id = transferring_id_array[loop_counter]; // Bez obzira na dubinu mora se vratiti 1 unazad (resetovace se kada je samo jedan for, jer je array[0] = 0)
+			
+			// Ovaj if moze samo ovo u else da se stavi i bice isto
+			if(transferring_second_literal_array[loop_counter] == 0){ // array[0] = 0 uvek
+				loop_transferring_second_literal = 0; // Reset
+			}else{
+				loop_transferring_second_literal = transferring_second_literal_array[loop_counter];
+			}
 			// Brisanje simbola za loop iz tabele preko steka
 			clear_symbols(stack_of_loop_starts_indexes[stack_indexer]);
 			stack_indexer--;
-			// Zbog ovoga nemamo akciju posle statement-a
-
-			//code("\n@loop_exit%d:", loop_counter); // TODO: Ako imamo for u for-u ovo nece biti dobro
 		}
 	;
 
 loop_first_part
-	: FOR LPAREN TYPE ID ASSIGN 
+	: FOR LPAREN TYPE ID ASSIGN literal // Prvi literal mora ovde zbog gen_mov-a
 		{
-			loop_transferring_type = $3;
-			loop_transferring_id = $4;
-			loop_counter++; // Cim se napravi novi loop moramo da in
-
 			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji na tom scope-u (nivou) definisana (definisanje -> == block_level, znaci slicno kao variables_only)
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){ // Mora == (GVAR ne ubrajamo u proveru za gresku jer moze da ga redefinise)
@@ -758,40 +787,55 @@ loop_first_part
 			var_num++;
 			stack_indexer++; // Za prvi loop sa -1 na 0
 			// TODO: Treba neki loop_counter za labele u asm koji se nece resetovati, znaci isto kao kod if-a, mozda da se stavi u novoj akciji izmedju LPAREN i TYPE
-			stack_of_loop_starts_indexes[stack_indexer] = insert_symbol($4, VAR, $3, var_num, stack_indexer); // insert_symbol vraca indeks, punimo stek, za block_level se stavlja stack_indexer, jer je svaki for novi blok 
+			int idx = insert_symbol($4, VAR, $3, var_num, stack_indexer);
+			stack_of_loop_starts_indexes[stack_indexer] = idx; // Punimo stek, za block_level se stavlja stack_indexer, jer je svaki for novi blok 
 
-			// gen_mov($1, loop_transferring_id); // int i = 1
-			// // Pocinju naredbe u loop-u
-			// code("\n@loop_start%d:", loop_counter);
+			loop_transferring_type = $3;
+			loop_transferring_id = idx;
+			loop_transferring_first_literal = $6;
+			loop_counter++; // Cim se napravi novi loop
+			transferring_id_array[loop_counter] = idx;
+
+			gen_mov(loop_transferring_first_literal, loop_transferring_id); // int i = 1
+			// Pocinju naredbe u loop-u, pa moramo da pravimo labelu za skok
+			lab_num++;
+			$$ = lab_num;
+			code("\n@loop_start%d:", lab_num);
 		}
 	;
 
 loop_second_part
-	: literal TO literal RPAREN  // Mora ovde akcija, ako je pre javlja se konflikt sa donjom alternativom
+	: TO literal RPAREN  // Mora ovde akcija, ako je pre javlja se konflikt sa donjom alternativom
 		{
 			// Razlog zasto razdavajamo ovde je da bi se iz tabele simbola (u sledecoj akciji) brisali i literali iz inicijalizacije iteracije
-			if(loop_transferring_type != get_type($1)
-				|| loop_transferring_type != get_type($3)) 
+			if(loop_transferring_type != get_type(loop_transferring_first_literal)
+				|| loop_transferring_type != get_type($2)) 
 				err("Types of literals in the iteration definition aren't the same.\n");
 			
-			int lit1 = atoi(get_name($1));
-			int lit2 = atoi(get_name($3));
+			int lit1 = atoi(get_name(loop_transferring_first_literal));
+			int lit2 = atoi(get_name($2));
 
 			// get_name($n) je vrednost literala (njegovo ime), ali string, mora atoi()
 			if(lit1 >= lit2)
 				err("Start of the loop isn't smaller than the end.\n");
+
+			loop_transferring_second_literal = $2;
+			transferring_second_literal_array[loop_counter] = loop_transferring_second_literal;
+
+			// TODO: Mozda provera treba ovde, odmah na pocetku for-a da slucajno ne izvrsi naredbe iako je i vece od kraja
+			// Ali onda ne bi prosao ovu proveru gore HA!
 		} 
-	statement // Nema akcije posle statement-a, vidi akciju u loop-u (ne moze statement pre ove akcije)
-	| literal TO literal STEP literal RPAREN 
+	statement
+	| TO literal STEP literal RPAREN 
 		{
-			if(loop_transferring_type != get_type($1)
-				|| loop_transferring_type != get_type($3)
-				|| loop_transferring_type != get_type($5)) 
+			if(loop_transferring_type != get_type(loop_transferring_first_literal)
+				|| loop_transferring_type != get_type($2)
+				|| loop_transferring_type != get_type($4)) 
 				err("Types of literals in the iteration definition aren't the same.\n");
 
-			int lit1 = atoi(get_name($1));
-			int lit2 = atoi(get_name($3));
-			int step = atoi(get_name($5));
+			int lit1 = atoi(get_name(loop_transferring_first_literal));
+			int lit2 = atoi(get_name($2));
+			int step = atoi(get_name($4));
 
 			if(lit1 >= lit2)
 				err("Start of the loop isn't smaller than the end.\n");
@@ -801,6 +845,9 @@ loop_second_part
 				err("Step needs to be a positive integer.\n"); 
 			else if(step > (lit2 - lit1))
 				err("Step needs to be lesser or equal to the difference in literals.\n");
+
+			loop_transferring_second_literal = $2;
+			// TODO: Dodaj za treci lit
 		}
 	statement
 	;
