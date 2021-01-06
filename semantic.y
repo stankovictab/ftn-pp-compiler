@@ -6,7 +6,7 @@
 Default atributi u Tabeli Simbola :
 Atribut 1 :
 - Za lokalnu promenljivu (varijablu) - redni broj promenljive po definisanju u funkciji,
-- Za parametar - redni broj parametra,
+- Za parametar - redni broj parametra (mora da bude zbog GK-a),
 - Za funkciju – broj parametara,
 - Za ostale simbole - nije definisano.
 Atribut 2 :
@@ -14,32 +14,47 @@ Atribut 2 :
 - Za ostale simbole - nije definisano.
 
 Moje izmene :
-Za parametar je atr1 indeks funkcije za koji je (nigde se ne koristi redni broj parametra iz simbola u tabeli (ali ta globalna varijabla jeste bitna ovako)), a atr2, koji predstavlja block_level, je uvek 0 (bitan zbog provere nivoa, uvek ce biti 0 za parametre).
+Za parametar je atr2 block_level, i uvek je 0 (bitan je zbog provere nivoa)
 Za funkcije atr2 vise nije nista, jer tipove parametara pamtimo u tabeli simbola.
 Za varijable je atr2 block_level.
+Za GVAR je isto atr2 block_level, i uvek je -1.
 
 symtab.h nije menjan.
 symtab.c je menjan, mora da se stavi "GVAR" u symbol_kinds u print_symtab() jer stavlja (null) umesto GVAR u tabeli.
 defs.h je menjan, dodat je samo VOID kao tip.
+To je to, 4 fajla sam menjao.
 Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr.
 */
 
-// TODO: Izvrsavanje na pdf-u je ustvari GK (valjda?)
+// Umesto idx = j je stajalo idx = lookup_symbol(get_name(j), VAR|PAR); (izbrisi posle ako radi sve)
+
+// TODO: Izvrsavanje na pdf-u je ustvari GK
+
 // TODO: //RETURN: za GK za sve moje testove
 
-// == block_level se stavlja kada se radi definisanje, a <= kada se radi provera da li postoji promenljiva (varijabla ili parametar)
-
-// Posto ne moze da se stavi int main = 3; iznad int main(), to znaci da za GVAR moramo da proveravamo i FUN pored GVAR-ova (tako je u C-u)
-
-// TODO: Gvar u ostalim pojmovima da se stavi, svuda gde treba da se proverava da li i takva promenljiva moze. Obrati paznju da VAR ima prednost nad GVAR u funkciji ako oni imaju isto ime, tako da prvo treba provera za VAR, pa onda za GVAR ako ne nadje simbol.
-
-// TODO: GVAR provera da se stavi i u mojim pojmovima, pa testovi
+// == block_level se stavlja kada se radi definisanje, a nista se ne stavlja (ili <=) kada se radi provera da li postoji promenljiva (varijabla ili parametar)
 
 // TODO: Vidi cemu sluzi free_if_reg() svuda
 
-// TODO: Testiraj test-temp i vidi zasto ne ispisuje argumente pre CALL-a dobro
+// TODO: Za for onaj hardcode JGES treba da moze i JGEU
 
-// TODO: Objasni if GK sve
+// TODO: Niz koji cuva sve elemente koji treba da se inkrementuju pa oni tek posle u GK
+// Za npr a = a++ + b++; NE treba da se broji koliko puta je bilo inkrementiranja pa da se tolko uveca a
+// Mora da se vidi koji su se ID-evi inkrementovali, da se oni posle ovoga inkrementuju
+// Treba da napravim testove za inkrement u svim slucajevima ako vec ne postoji
+
+// Za a==1, a = a++ + a++ ce biti ovako:
+// prvo a++ ce biti 1, jer se ++ radi tek posle
+// Kada dodje do + izmedju, uradio se taj ++, i sada su nove vrednosti za a 2, ali je leva strana jos uvek 1
+// Onda ce biti 1+2 sve to, a ovo drugo a++ nema uticaja jer ce ga override-ovati celokupna dodela
+// (a++ ce povecati a na kraju ++, a ne tek na ;)
+// Tako da je rezultat 3, a ne 4
+// dakle ++ ce menjati sledece a, a ne to na kojem je zakaceno, osim poslednjeg ++ koji ne menja nista
+// Za a==1, a = ++a + ++a ce biti 6, jer prvo inkrementuje a pa opet ink a, pa sabira a i a
+
+// TODO: Treba inkrement i sa ADDU, ima jedan test takav
+
+// ASM parsing error znaci da HipSim-u ne saljes .asm fajl
 
 %{
 	#include <stdio.h>
@@ -84,7 +99,8 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	FILE *output; // Vidi main() skroz dole, tu se inicijalizuje
 
 	int argument_pusher_array[ARRAY_LIMIT]; // Niz indeksa registra koji imaju vrednosti num_exp-ova koji se prosledjuju u pozivu funkcije, da bi mogao da argumente push-ujem na stackframe u obrnutom redosledu
-	int argument_pusher_indexer = 0; // TODO: Brisi?
+	int increment_todo_array[ARRAY_LIMIT] = {0}; // Niz indeksa ID-eva koji trebaju da se inkrementuju
+	int increment_array_indexer = 0;
 %} 
 
 %union {
@@ -123,7 +139,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 %token RSQUAREBRACKET
 
 // Ovde arguments, argument_list i if_part
-%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -131,7 +147,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 %%
 
 program
-	: global_list function_list // Prvo globalne pa onda funkcije
+	: global_list function_list
 		{  
 			// Javlja gresku ako main() uopste ne postoji u tabeli simbola
 			if(lookup_symbol("main", FUN) == NO_INDEX)
@@ -262,7 +278,8 @@ parameter
 	: TYPE ID // Parametar ne moze biti VOIDTYPE
 		{
 			// Pre ubacivanja proveravamo da li je trenutni parametar vec definisan za trenutnu funkciju preko tabele simbola
-			// Gledamo od indeksa funkcije do kraja tabele, jer varijabli nema
+			// Ne radimo lookup_symbol() da ne bi uzeli parametre neke trece funkcije u razmatranje
+			// Gledamo od indeksa trenutne funkcije do kraja tabele, jer varijabli nema
 			// Ne ubrajamo simbol funkcije za slucaj int foo(unsigned foo){...}
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
 				if(strcmp(get_name(j), $2) == 0){ // Provera za block_level nema smisla ovde
@@ -272,7 +289,7 @@ parameter
 			// Za svaki parametar koji prodje moramo da povecamo broj parametara za update-ovanje atr1 funkcije
 			parameter_number++;
 			// Pri ubacivanju parametra, postavlja mu se indeks funkcije za koji je, kao i nivo, koji je uvek 0 (sluzi za kasniju proveru u operacijama)
-			insert_symbol($2, PAR, $1, fun_idx, 0);
+			insert_symbol($2, PAR, $1, parameter_number, 0);
 		}
 	;
 
@@ -281,8 +298,11 @@ body
 		{
 			// Ako je bilo promenljivih definisano u funkciji, napravi mesta za njih na stackframe-u (pomeri %esp na dole) i napravi labelu za statement-e
 			if(var_num)
-				code("\n\t\tSUBS\t%%15,$%d,%%15", 4*var_num);
-			code("\n@%s_body:", get_name(fun_idx));
+				code("\n\t\tSUBS\t%%15,$%d,%%15", 4 * var_num);
+				// Pomeramo %esp na dole da napravimo mesta (jedna promenljiva -> 4 bajta)
+				// Lokalne promenljive ce ostati na stackframe-u dok se ne overwrite-uju, pa zato nema ADDS za ovaj SUBS, nema potrebe, jer ce odmah u exit labeli funkcije da se radi MOV %14, %15, sto pomera %esp na gore
+			code("\n@%s_body:", get_name(fun_idx)); 
+			// Od ove labele krece body koji ce se generisati iz ostalih pojmova koji prave statement_list-u
 		}
 	statement_list RCURLYBRACKET
 	;
@@ -302,7 +322,7 @@ variables_def_line
 		}
 	variables_only SEMICOLON 
 		{
-			// Kada smo iskoristili vartype, moramo da ga resetujemo (cim se napravi variables_def_line)
+			// Kada smo iskoristili vartype, moramo da ga resetujemo (cim se napravi variables_def_line) (ovo je mozda nepotrebno)
 			vartype = 0;
 		}
 	;
@@ -318,7 +338,7 @@ variables_only
 			// Ne gledamo sam simbol funkcije jer lokalna varijabla moze da ima isto ime kao njena funkcija
 			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku, ako ne nadje isto ime dodajemo
 			// Za tip varijable koristimo vartype koji je postavljen u variables_def_line
-			// Takodje dodajemo proveru za nivo bloka, da na trenutnom nivou ne moze da se definise promenljiva koja je tu vec definisana (bitno je da je definisana, a ne koja tu samo postoji, vidi compound_statement)
+			// Takodje dodajemo proveru za nivo bloka, da na trenutnom nivou ne moze da se definise promenljiva koja je tu vec definisana (bitno je da je definisana, a ne koja tu samo postoji, jer ako smo pre imali int a;, i u novom bloku opet int a;, to moze jer ce se vrednost a overwrite-ovati samo u tom scope-u, vidi compound_statement)
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $1) == 0 && get_atr2(i) == block_level){ // Mora == kada definisemo varijablu
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $1);
@@ -388,11 +408,8 @@ assignment_statement
 		// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
 		// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
 		for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
-				// TODO: NE IDE OVDE PROVERA <= BLOCKLEVEL JER SE ONI BRISU, ISPRAVI OVDE I SVUDA GDE TREBA
-					idx = lookup_symbol(get_name(j), VAR|PAR); 
-					// Iako lookup_symbol() radi sa get_name(), on nece uzeti neki var u novom bloku, 
-					// jer se ipak gleda po tom j koji je prosao gornji uslov, tako da ce uvek uzeti dobar var
+				if(strcmp(get_name(j), $1) == 0) // U ovoj proveri moze, a i ne mora, da se stavi && get_atr2(j) <= block_level, zato sto svi simboli u tabeli sigurno nece imati block_level veci od trenutnog, zato sto se svaki prethodni novi blok izbrisao, vidi compound_statement (ako smo u nivou 0, nece postojati nista iz nivoa 1)
+					idx = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
 			}
 		if(idx == NO_INDEX)
 			idx = lookup_symbol($1, GVAR);
@@ -400,8 +417,26 @@ assignment_statement
 			err("Local or global variable or parameter by the name '%s' in assignment doesn't exist.\n", $1);
 		else if(get_type(idx) != get_type($3))
 			err("Incompatible types in assignment.\n");
-		// Generisanje koda za dodelu - vrednost num_exp-a ide u ID
+		
+		// Generisanje koda za dodelu - vrednost num_exp-a ide u ID (treba da ostane ovde)
 		gen_mov($3, idx);
+
+		// Inkrementujemo te ID-eve koji su sami inkrementovani
+		// TODO: Pretpostavljamo da je svaki ID maksimalno jednom inkrementovan u assign statement-u, jer su oni tako na pdf-u prikazali asembler, zapravo po gcc-u treba da se uveca za 1 ako se ID inkrementovao dvaput u izrazu, ili da se uveza za 3 ako se pojavio triput, etc
+		// Takodje, a = a++ nece da inkrementuje po gcc-u ali ovde hoce
+		for(int i = 0; i < ARRAY_LIMIT; i++){
+			if(increment_todo_array[i] != 0){
+				code("\n\t\tADDS\t"); // TODO: ADDU
+				gen_sym_name(increment_todo_array[i]);
+				code(",$1,");
+				gen_sym_name(increment_todo_array[i]);
+			}
+		}
+
+		// Reset
+		increment_array_indexer = 0;
+		for(int i = 0; i < ARRAY_LIMIT; i++)
+			increment_todo_array[i] = 0;
 		}
 	;
 
@@ -424,7 +459,7 @@ num_exp
 			code(",");
 			gen_sym_name($3); // Ovo ne mora da bude registar
 			code(",");
-			// Ovo je nebitno
+			// Oslobadjamo odmah zauzete registre u obrnutom redosledu
 			free_if_reg($3);
 			free_if_reg($1);
 			$$ = take_reg(); // Semanticka vrednost je indeks registra sa rezultatom
@@ -443,14 +478,20 @@ exp
 			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
 			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
-					idx = lookup_symbol(get_name(j), VAR|PAR); // Semanticka vrednost exp-a sa ID-em je indeks ID-a u tabeli simbola
+				if(strcmp(get_name(j), $1) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idx = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
 			}
 			if(idx == NO_INDEX)
 				idx = lookup_symbol($1, GVAR);
 			if(idx == NO_INDEX)
 				err("'%s' undeclared.\n", $1);
-			$$ = idx; // Jos u micku se postavljalo
+			$$ = idx; // Semanticka vrednost exp-a sa ID-em je indeks ID-a u tabeli simbola
+
+			// Provera da li je bilo inkrementa nad tim ID-em
+			if($2 == 1){
+				increment_todo_array[increment_array_indexer] = idx;
+				increment_array_indexer++;
+			}
 		}
 	| function_call
 		{
@@ -472,7 +513,13 @@ literal
 
 increment_optional
 	: /* empty */
+		{
+			$$ = 0; // Nije bilo inkrementa
+		}
 	| INCREMENT
+		{
+			$$ = 1; // Bilo je inkrementa
+		}
 	;
 
 function_call
@@ -490,11 +537,8 @@ function_call
 	LPAREN argument_list RPAREN
 		{
 			// Ovde je pre pisalo samo $$ = lookup_symbol($1, FUN);
-			
-			// Semanticka vrednost pojma argument_list je broj argumenata u pozivu
-			// TODO: OVDE NIKAD NECE UCI, VEC IMAM TE PROVERE
-			if(get_atr1(fcall_idx) != $4)
-         		err("Wrong number of arguments passed to function '%s'.\n", get_name(fcall_idx));
+			// U micku su koristili semanticku vrednost argument_list-e za broj argumenata, ja imam globalnu varijablu
+			// Takodje su ovde radili proveru broja argumenata, ja to radim u argument_list
 
 			// Generisanje koda za argumente - push-ujemo ih na stackframe u obrnutom redosledu, mora pre CALL-a
 			for(int i = argument_number - 1; i >= 0; i--){
@@ -506,26 +550,27 @@ function_call
 			// Pravi se poziv uz ime funkcije, koje ce biti labela
 			code("\n\t\t\tCALL\t%s", get_name(fcall_idx));
 			// Nakon poziva, kada funkcija zavrsi sa radom, moramo da izbrisemo mesta za argumente koji su joj prosledjeni (ovaj if nije ni potreban)
-			if($4 > 0)
-				code("\n\t\t\tADDS\t%%15,$%d,%%15", $4 * 4);
+			if(argument_number > 0)
+				code("\n\t\t\tADDS\t%%15,$%d,%%15", argument_number * 4);
 			set_type(FUN_REG, get_type(fcall_idx)); // Postavlja tip za %13
 			$$ = FUN_REG; // Semanticka vrednost poziva je uvek 13
+
+			// Resetujemo broj argumenata za sledeci poziv
+			argument_number = 0;
 		}
 	;
 
 // Mora da se doda kao poseban pojam da ne bi proslo nesto kao
 // b = f(,a,c);
-// Semanticka vrednost pojma argument_list je broj argumenata u pozivu
 argument_list
 	: /* empty */
 		{
 			// Ako nismo prosledili argumente, moramo da proverimo da li funkcija zapravo zahteva parametre
 			if(get_atr1(fcall_idx) > 0)
 				err("Function '%s' requires arguments!\n", get_name(fcall_idx));
-			// Ako je tacno 0, onda postavljamo semanticku vrednost kao broj argumenata
-			$$ = 0;
+			// argument_number ostaje 0
 		}
-	| arguments
+	| arguments	
 		{
 			// Moramo ovde da proverimo broj argumenata, jer argumenti mogu da budu svakakvi, pa nema smisla to proveravati u akcijama dole
 			// U tim akcijama dole se znaci samo postavlja argument_number, ali se ovde proverava
@@ -533,11 +578,6 @@ argument_list
 				err("Too few arguments passed to function '%s'.\n", get_name(fcall_idx));
 			else if(get_atr1(fcall_idx) < argument_number)
 				err("Too many arguments passed to function '%s'.\n", get_name(fcall_idx));
-			else{
-				// Tacan broj argumenata, postavljamo semanticku vrednost i resetujemo za sledeci poziv
-				$$ = argument_number;
-				argument_number = 0;
-			}
 		}
 	;
 
@@ -652,14 +692,23 @@ return_statement
 increment_statement
 	: ID INCREMENT SEMICOLON
 		{
-			// Promenjeno da gleda samo VAR|PAR trenutne funkcije, da ne uzme slucajno parametar neke trece (lokalni lookup)
 			int idx = NO_INDEX;
+			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
 			for(int j = fun_idx + 1; j <= get_last_element(); j++){
-				if(strcmp(get_name(j), $1) == 0 && get_atr2(j) <= block_level) // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
-					idx = lookup_symbol(get_name(j), VAR|PAR);
+				if(strcmp(get_name(j), $1) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idx = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
 			}
 			if(idx == NO_INDEX)
+				idx = lookup_symbol($1, GVAR);
+			if(idx == NO_INDEX)
 				err("'%s' undeclared.\n", $1);
+			// increment_statement-u se ne postavlja semanticka vrednost (za sad)
+
+			code("\n\t\tADDS\t"); // TODO: Proveri da li radi za GVAR-ove, i valjda treba i da se pravi destinkcija da li je S ili U
+			gen_sym_name(idx);
+			code(",$1,");
+			gen_sym_name(idx);
 		}
 	;
 
@@ -682,14 +731,15 @@ loop_first_part
 		{
 			loop_transferring_type = $3;
 			// TODO: Obrati paznju za GK da se ovde zapravo desava dodela
-			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji
+
+			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji na tom scope-u (nivou) definisana (definisanje -> == block_level)
 			// Prekopirano iz variables_only, prva alternativa, samo zamenjeno $n
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
-				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){ // Mora == zbog toga kako radi loop (pokriva i parametre)
+				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){ // Mora == (GVAR ne ubrajamo u proveru za gresku jer moze da ga redefinise)
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $4);
 				}
 			}
-			var_num++; // Pozeljan
+			var_num++;
 			stack_indexer++; // Za prvi loop sa -1 na 0
 			stack_of_loop_starts_indexes[stack_indexer] = insert_symbol($4, VAR, $3, var_num, block_level); // insert_symbol vraca indeks, punimo stek
 		}
@@ -733,7 +783,7 @@ loop_second_part
 		}
 	statement
 	;
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////
 // Ovakvim switch-om ne onemogucujemo switch u switch-u, mada se to nece ni pregledati
 // Moze da se napise switch[a] pa opet switch[a], to je podrzano
 switch_statement
@@ -747,15 +797,18 @@ switch_statement
 
 			// Provera da li je ID po kojem se radi switch vec definisana promenljiva, ako jeste ok je
 			// Takodje, pamtimo tip te promenljive za proveru u svakom case-u, da li je literal dobrog tipa
-			int flag = 0;
-			for(int i = fun_idx + 1; i <= get_last_element(); i++){
-				if(strcmp(get_name(i), $3) == 0 && get_atr2(i) <= block_level){ // <= jer u novom bloku moze da se promeni vrednost var-a u proslom (mora da se stavi provera za npr one iz block level 2 a mi smo u 0)
-					// Postoji, postavljamo tip i flag za gresku
-					flag = 1;
-					switch_type = get_type(i);
-				}
+			int idx = NO_INDEX;
+			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $3) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idx = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
+					switch_type = get_type(j);
 			}
-			if(flag == 0) err("Variable or parameter '%s' in switch statement not defined.\n", $3);
+			if(idx == NO_INDEX)
+				idx = lookup_symbol($3, GVAR);
+			if(idx == NO_INDEX)
+				err("Variable or parameter '%s' in switch statement not defined.\n", $3);
 		}
 		RSQUAREBRACKET LCURLYBRACKET case_list otherwise_optional RCURLYBRACKET
 	;

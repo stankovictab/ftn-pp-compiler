@@ -1,4 +1,5 @@
 //OPIS: Sanity check za miniC gramatiku
+// Davalo je FAILED zbog warning-a da main() nema return
 
 int f(int x) {
 	int y;
@@ -63,4 +64,6 @@ int main() {
 
 	if(a + c == b - +4) //7
 		a = 1;
+
+	return a; // Dodato
 }
