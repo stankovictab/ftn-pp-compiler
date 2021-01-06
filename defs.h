@@ -11,14 +11,12 @@
 #define LAST_WORKING_REG 12
 #define FUN_REG 13
 #define CHAR_BUFFER_LENGTH 128
-
 extern char char_buffer[CHAR_BUFFER_LENGTH];
-extern int out_lin;
 
+extern int out_lin;
 //pomocni makroi za ispis
 extern void warning(char *s);
 extern int yyerror(char *s);
-
 #define err(args...) sprintf(char_buffer, args), yyerror(char_buffer)
 #define warn(args...) sprintf(char_buffer, args), warning(char_buffer)
 #define code(args...) ({fprintf(output, args); \
@@ -28,7 +26,7 @@ extern int yyerror(char *s);
 enum types { NO_TYPE,
 			 INT,
 			 UINT,
-			 VOID }; // Dodato VOID
+			 VOID };
 
 //vrste simbola (moze ih biti maksimalno 32)
 enum kinds { NO_KIND = 0x1,
@@ -37,7 +35,7 @@ enum kinds { NO_KIND = 0x1,
 			 FUN = 0x8,
 			 VAR = 0x10,
 			 PAR = 0x20,
-			 GVAR = 0x40 }; // Vec dodato
+			 GVAR = 0x40 };
 
 //konstante arithmetickih operatora
 enum arops { ADD,
@@ -45,7 +43,6 @@ enum arops { ADD,
 			 MUL,
 			 DIV,
 			 AROP_NUMBER };
-
 //stringovi za generisanje aritmetickih naredbi
 static char *ar_instructions[] = {"ADDS", "SUBS", "MULS", "DIVS",
 								  "ADDU", "SUBU", "MULU", "DIVU"};
@@ -58,7 +55,6 @@ enum relops { LT,
 			  EQ,
 			  NE,
 			  RELOP_NUMBER };
-
 //stringovi za JMP narebu
 static char *jumps[] = {"JLTS", "JGTS", "JLES", "JGES", "JEQ ", "JNE ",
 						"JLTU", "JGTU", "JLEU", "JGEU", "JEQ ", "JNE "};

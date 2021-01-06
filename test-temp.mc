@@ -1,5 +1,5 @@
 //OPIS: test-temp
-//RETURN: 1
+//RETURN: 0
 
 int a;
 

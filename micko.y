@@ -56,13 +56,15 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 
 // ASM parsing error znaci da HipSim-u ne saljes .asm fajl
 
+// Ako nema //RETURN:, to ce biti PASSED
+
 %{
 	#include <stdio.h>
 	#include <stdlib.h>
 	#include "defs.h"
 	#include "symtab.h"
 	#include <string.h> // Za strcmp
-	#include "codegen.c" // KT2, mora .c iz nekog razloga kod mene (greska undefined reference, ne ubaci .c kada ubacim .h??)
+	#include "codegen.h" // KT2
 
 	#define ARRAY_LIMIT 100
 	#define INT_MIN -2147483648

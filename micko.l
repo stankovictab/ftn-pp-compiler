@@ -2,7 +2,7 @@
 
 %{
    #include <string.h>
-   #include "semantic.tab.h"
+   #include "micko.tab.h"
    #include "defs.h"
    extern YYSTYPE yylval; // Dodato u 7. vezbama
 %}

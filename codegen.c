@@ -26,7 +26,7 @@ void free_reg(void) {
 		set_type(--free_reg_num, NO_TYPE);
 }
 
-// Ako je u pitanju indeks registra, oslobodi registar
+// Ako je u pitanju indeks registra, oslobodi registar NA VRHU STEKA!
 void free_if_reg(int reg_index) {
 	if(reg_index >= 0 && reg_index <= LAST_WORKING_REG)
 		free_reg();
@@ -41,7 +41,7 @@ void gen_sym_name(int index) {
 			code("%d(%%14)", 4 + get_atr1(index) * 4);
 		else if(get_kind(index) == LIT)
 			code("$%s", get_name(index));
-		else //function, reg
+		else //function, reg, gvar
 			code("%s", get_name(index));
 	}
 }
