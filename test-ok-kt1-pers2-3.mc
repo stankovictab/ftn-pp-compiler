@@ -1,4 +1,5 @@
 //OPIS: 2. Personalni (Loop) OK Test 3
+//RETURN: 1
 int main() {
 	int zbir;
 	int razlika;

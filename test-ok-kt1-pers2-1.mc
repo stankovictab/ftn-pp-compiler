@@ -1,4 +1,5 @@
 //OPIS: 2. Personalni (Loop) OK Test 1
+//RETURN: 3
 int main() {
 	int a;
 	for(int i = 1 to 5)
@@ -15,5 +16,5 @@ int main() {
 			a = 3;
 		}
 	}
-	return 1;
+	return a;
 }

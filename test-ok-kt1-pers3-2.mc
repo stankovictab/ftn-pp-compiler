@@ -1,10 +1,11 @@
 //OPIS: 3. Personalni (Switch) OK Test 2
+//RETURN: 3
 int main(int c) {
 	int a;
 	int b;
 
 	a = 5;
-	b = 3;
+	b = 2;
 	switch
 	[a] {
 		case 1 -> 
@@ -18,13 +19,12 @@ int main(int c) {
 			a = a - 1;
 	}
 	switch
-	[c] { // Switch na parametar
+	[c] { // Switch na parametar (nepostavljeni, mada ce biti 0, tako postavlja simulator)
 		case 1 -> // Ponovljen literal
-			b++;
+			a++;
 		case 0 -> // Literal 0
 			{
 				int i; // Definisanje u bloku
-				b = 0;
 				a = 3;
 				i = a + b;
 			}
@@ -35,7 +35,7 @@ int main(int c) {
 			} // Prazan case
 			finish;
 		otherwise ->
-			b = 0;
+			a = 0;
 	}
-	return a;
+	return b;
 }

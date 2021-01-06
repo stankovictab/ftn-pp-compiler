@@ -52,11 +52,11 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 // dakle ++ ce menjati sledece a, a ne to na kojem je zakaceno, osim poslednjeg ++ koji ne menja nista
 // Za a==1, a = ++a + ++a ce biti 6, jer prvo inkrementuje a pa opet ink a, pa sabira a i a
 
-// TODO: Treba inkrement i sa ADDU, ima jedan test takav
-
 // ASM parsing error znaci da HipSim-u ne saljes .asm fajl
-
 // Ako nema //RETURN:, to ce biti PASSED
+// Samo ok testovi treba da imaju //RETURN:
+
+// TODO: Svaki test u C da vidis result pa uporedi sa -r rezultatom
 
 %{
 	#include <stdio.h>
@@ -91,6 +91,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int stack_of_loop_starts_indexes [ARRAY_LIMIT] = {0}; // Stek sa indeksima varijabli koje su inicijalizovane u definicijama iteracija, potreban za brisanje simbola iz tabele na kraju loop-a
 	int stack_indexer = -1;
 	int loop_transferring_type = 0; // (NO_TYPE)
+	int loop_transferring_id = 0;
 	unsigned switch_type = 0; // unsigned je jer get_type vraca unsigned
 	int switch_array[ARRAY_LIMIT]; // Niz literala trenutnog switch-a za proveru koriscenih (ne moze ovde sve da se inicijalizuje na INT_MIN, nego mora u switch-u)
 	int switch_array_indexer = 0;
@@ -103,6 +104,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int argument_pusher_array[ARRAY_LIMIT]; // Niz indeksa registra koji imaju vrednosti num_exp-ova koji se prosledjuju u pozivu funkcije, da bi mogao da argumente push-ujem na stackframe u obrnutom redosledu
 	int increment_todo_array[ARRAY_LIMIT] = {0}; // Niz indeksa ID-eva koji trebaju da se inkrementuju
 	int increment_array_indexer = 0;
+	int loop_counter = 0; // Za labele for-a
 %} 
 
 %union {
@@ -381,7 +383,6 @@ statement
 // Svaki compound_statement se razlikuje po svom nivou, koji je atr2 kod njegovih lokalnih varijabli
 // GVAR ovo nece imati, samo VAR, a nivo 0 je nivo main-a, odnosno nulti blok
 // Pri definisanju varijabli sada moramo da proveravamo nivo na kojem se definise
-// Takodje, za svaku proveru postojanja varijable sada moramo da radimo proveru za nivo
 // Sve novodefinisane varijable u bloku se brisu na kraju bloka iz tabele simbola
 // Ako je na prvom nivou x definisano, moze i na drugom nivou opet da se definise, ali ce se vrednost overwrite-ovati (kao sa GVAR-ovima)
 // Ako se ne redefinise, nego se samo vrednost promeni, vrednost ce se promeniti i u prethodnom bloku (tako je u C-u)
@@ -425,10 +426,15 @@ assignment_statement
 
 		// Inkrementujemo te ID-eve koji su sami inkrementovani
 		// TODO: Pretpostavljamo da je svaki ID maksimalno jednom inkrementovan u assign statement-u, jer su oni tako na pdf-u prikazali asembler, zapravo po gcc-u treba da se uveca za 1 ako se ID inkrementovao dvaput u izrazu, ili da se uveza za 3 ako se pojavio triput, etc
-		// Takodje, a = a++ nece da inkrementuje po gcc-u ali ovde hoce
+		// Takodje, a = a++; nece da inkrementuje po gcc-u ali ovde hoce
 		for(int i = 0; i < ARRAY_LIMIT; i++){
 			if(increment_todo_array[i] != 0){
-				code("\n\t\tADDS\t"); // TODO: ADDU
+				if(get_type(idx) == INT){
+					code("\n\t\tADDS\t");
+					
+				}else{
+					code("\n\t\tADDU\t");
+				}
 				gen_sym_name(increment_todo_array[i]);
 				code(",$1,");
 				gen_sym_name(increment_todo_array[i]);
@@ -707,7 +713,11 @@ increment_statement
 				err("'%s' undeclared.\n", $1);
 			// increment_statement-u se ne postavlja semanticka vrednost (za sad)
 
-			code("\n\t\tADDS\t"); // TODO: Proveri da li radi za GVAR-ove, i valjda treba i da se pravi destinkcija da li je S ili U
+			if(get_type(idx) == INT){
+				code("\n\t\tADDS\t");
+			}else{
+				code("\n\t\tADDU\t");
+			}
 			gen_sym_name(idx);
 			code(",$1,");
 			gen_sym_name(idx);
@@ -720,11 +730,15 @@ loop
 	: loop_first_part loop_second_part 
 		{
 			// Kraj loop-a, bilo da je ugnjezden ili ne
-			loop_transferring_type = 0; // Reset
+			// Reset
+			loop_transferring_type = 0; 
+			loop_transferring_id = 0; 
 			// Brisanje simbola za loop iz tabele preko steka
 			clear_symbols(stack_of_loop_starts_indexes[stack_indexer]);
 			stack_indexer--;
 			// Zbog ovoga nemamo akciju posle statement-a
+
+			//code("\n@loop_exit%d:", loop_counter); // TODO: Ako imamo for u for-u ovo nece biti dobro
 		}
 	;
 
@@ -732,10 +746,10 @@ loop_first_part
 	: FOR LPAREN TYPE ID ASSIGN 
 		{
 			loop_transferring_type = $3;
-			// TODO: Obrati paznju za GK da se ovde zapravo desava dodela
+			loop_transferring_id = $4;
+			loop_counter++; // Cim se napravi novi loop moramo da in
 
-			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji na tom scope-u (nivou) definisana (definisanje -> == block_level)
-			// Prekopirano iz variables_only, prva alternativa, samo zamenjeno $n
+			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji na tom scope-u (nivou) definisana (definisanje -> == block_level, znaci slicno kao variables_only)
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){ // Mora == (GVAR ne ubrajamo u proveru za gresku jer moze da ga redefinise)
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $4);
@@ -743,7 +757,12 @@ loop_first_part
 			}
 			var_num++;
 			stack_indexer++; // Za prvi loop sa -1 na 0
-			stack_of_loop_starts_indexes[stack_indexer] = insert_symbol($4, VAR, $3, var_num, block_level); // insert_symbol vraca indeks, punimo stek
+			// TODO: Treba neki loop_counter za labele u asm koji se nece resetovati, znaci isto kao kod if-a, mozda da se stavi u novoj akciji izmedju LPAREN i TYPE
+			stack_of_loop_starts_indexes[stack_indexer] = insert_symbol($4, VAR, $3, var_num, stack_indexer); // insert_symbol vraca indeks, punimo stek, za block_level se stavlja stack_indexer, jer je svaki for novi blok 
+
+			// gen_mov($1, loop_transferring_id); // int i = 1
+			// // Pocinju naredbe u loop-u
+			// code("\n@loop_start%d:", loop_counter);
 		}
 	;
 
@@ -788,6 +807,7 @@ loop_second_part
 //////////////////////////////////////////////////////////////////////////////////////////////
 // Ovakvim switch-om ne onemogucujemo switch u switch-u, mada se to nece ni pregledati
 // Moze da se napise switch[a] pa opet switch[a], to je podrzano
+// TODO: Isto treba labele koje se ne resetuju, ali nema switch u switch-u
 switch_statement
 	: SWITCH LSQUAREBRACKET ID 
 		{

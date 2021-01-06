@@ -1,12 +1,5 @@
 //OPIS: 1. Personalni (Blok) OK Test
-int f() {
-	{
-		int b;
-		b = 180;
-	}
-	return 1;
-}
-
+//RETURN: 201
 int main() {
 	int o;
 	int i;
@@ -25,7 +18,7 @@ int main() {
 			k = 21;
 			o = 3;
 		}
-		i = 1;
+		i = 1; // Menja pravo i, nece se resetovati na kraju bloka na 100
 		k = 84;
 	}
 	suma = o + i;

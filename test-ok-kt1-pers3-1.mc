@@ -1,4 +1,5 @@
 //OPIS: 3. Personalni (Switch) OK Test 1
+//RETURN: 3
 int main() {
 	int a;
 	int b;
@@ -16,5 +17,5 @@ int main() {
 		otherwise ->
 			a = a - 1;
 	}
-	return a;
+	return b;
 }
