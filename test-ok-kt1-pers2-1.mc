@@ -19,7 +19,7 @@ int main() {
 		i++;
 		i = a + i;
 	}
-	for(int i = 1 to 4 step 3) {
+	for(int i = 1 to 5 step 3) {
 		if(i > 2) {
 			a = 3;
 		}

@@ -89,11 +89,12 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int argument_number = 0;
 	int block_level = 0; // Brojac nivoa za ugnjezdene blokove koda (atr2 kod VAR-ova)
 	int stack_of_loop_starts_indexes [ARRAY_LIMIT] = {0}; // Stek sa indeksima varijabli koje su inicijalizovane u definicijama iteracija, potreban za brisanje simbola iz tabele na kraju loop-a
-	int stack_indexer = -1;
+	int loop_depth = -1; // Ovo je indekser za gornji stek
 	int loop_transferring_type = 0; // (NO_TYPE)
 	int loop_transferring_id = 0;
-	int loop_transferring_first_literal = 0;
+	int loop_transferring_first_literal = 0; // Ovo su indeksi literala, a ne tacne vrednosti 
 	int loop_transferring_second_literal = 0;
+	int loop_transferring_third_literal = 0;
 	unsigned switch_type = 0; // unsigned je jer get_type vraca unsigned
 	int switch_array[ARRAY_LIMIT]; // Niz literala trenutnog switch-a za proveru koriscenih (ne moze ovde sve da se inicijalizuje na INT_MIN, nego mora u switch-u)
 	int switch_array_indexer = 0;
@@ -106,9 +107,10 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int argument_pusher_array[ARRAY_LIMIT]; // Niz indeksa registra koji imaju vrednosti num_exp-ova koji se prosledjuju u pozivu funkcije, da bi mogao da argumente push-ujem na stackframe u obrnutom redosledu
 	int increment_todo_array[ARRAY_LIMIT] = {0}; // Niz indeksa ID-eva koji trebaju da se inkrementuju
 	int increment_array_indexer = 0;
-	int loop_counter = 0; // Za labele for-a TODO: Zasto 1
-	int transferring_second_literal_array[ARRAY_LIMIT] = {0};
-	int transferring_id_array[ARRAY_LIMIT] = {0};
+	int transferring_id_array[ARRAY_LIMIT] = {0}; // Niz ID-eva za prenos u ugnjezdene for-ove, nulti element uvek nula
+	int transferring_second_literal_array[ARRAY_LIMIT] = {0}; // Niz drugih literala za prenos u ugnjezdene for-ove, nulti element uvek nula
+	int transferring_third_literal_array[ARRAY_LIMIT] = {0}; // Niz trecih literala za prenos u ugnjezdene for-ove, nulti element uvek nula
+	int loop_depth_plus_one = 0; // Indekser za gornje nizove, veci je od loop_depth-a za 1 jer zelimo da preskocimo nulti element
 %} 
 
 %union {
@@ -147,7 +149,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 %token RSQUAREBRACKET
 
 // Ovde arguments, argument_list i if_part
-%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -463,20 +465,22 @@ num_exp
 			if(get_type($1) != get_type($3))
 				err("Invalid operands: arithmetic operation (incompatible types).\n");
 			int type = get_type($1);
-			// num_exp ce biti npr ADDS %1, %3, %4
-			// biramo aritmeticku operaciju na osnovu parsiranog AROP-a i tipa num_exp-a - $2 je vrsta operacije (ADD ili SUB), a ovaj proizvod je ili 0 ili 4 (AROP_NUMBER je makro za 4) i bira signed ili unsigned verziju operacije (ima 4 zbog MUL i DIV)
-			code("\n\t\t%s\t", ar_instructions[$2 + (type - 1) * AROP_NUMBER]);
-			// Operandi
-			gen_sym_name($1); // Ovo je valjda uvek registar
-			code(",");
-			gen_sym_name($3); // Ovo ne mora da bude registar
-			code(",");
-			// Oslobadjamo odmah zauzete registre u obrnutom redosledu
-			free_if_reg($3);
-			free_if_reg($1);
-			$$ = take_reg(); // Semanticka vrednost je indeks registra sa rezultatom
-			gen_sym_name($$); // Generise asm kod za taj registar kao rezultat operacije
-			set_type($$, type); // Postavljamo tip registra koji sadrzi vrednost num_exp-a na tip samog num_exp-a
+			if($2 + (type - 1) * AROP_NUMBER >= 0){ // Da bi izbegli segfault kod semerr nas 43, moramo da proverimo da li ar_instructions izlazi iz opsega i ulazi u nepristupacnu memoriju, to ce se desiti kada je type == 0, odnosno kada je $1 neki indeks koji nije u tabeli simbola (f++ ne nalazi f kao promenljivu, pa $1 vraca -1)
+				// num_exp ce biti npr ADDS %1, %3, %4
+				// biramo aritmeticku operaciju na osnovu parsiranog AROP-a i tipa num_exp-a - $2 je vrsta operacije (ADD ili SUB), a ovaj proizvod je ili 0 ili 4 (AROP_NUMBER je makro za 4) i bira signed ili unsigned verziju operacije (ima 4 zbog MUL i DIV)
+				code("\n\t\t%s\t", ar_instructions[$2 + (type - 1) * AROP_NUMBER]);
+				// Operandi
+				gen_sym_name($1); // Ovo je valjda uvek registar
+				code(",");
+				gen_sym_name($3); // Ovo ne mora da bude registar
+				code(",");
+				// Oslobadjamo odmah zauzete registre u obrnutom redosledu
+				free_if_reg($3);
+				free_if_reg($1);
+				$$ = take_reg(); // Semanticka vrednost je indeks registra sa rezultatom
+				gen_sym_name($$); // Generise asm kod za taj registar kao rezultat operacije
+				set_type($$, type); // Postavljamo tip registra koji sadrzi vrednost num_exp-a na tip samog num_exp-a
+			}
 		}
 	;
 
@@ -728,78 +732,83 @@ increment_statement
 		}
 	;
 
-// loop sam odvojio u 2 dela da bih prvo ID ubacio u tabelu simbola, pa tek onda literale, zbog kasnijeg oslobadjanja tabele simbola,
-// jer je mnogo lakse kada znam tacno od kog indeksa pocinje loop, da bih kasnije sa stekom indeksa tih ID-eva lakse oslobodio
+// loop sam odvojio u 2 dela da bih prvo ID ubacio u tabelu simbola, pa tek onda literale, zbog kasnijeg oslobadjanja tabele simbola, jer je mnogo lakse kada znam tacno od kog indeksa pocinje loop, da bih kasnije sa stekom indeksa tih ID-eva lakse oslobodio
+// Za gen_cmp indeks, za code atoi
 loop
 	: loop_first_part loop_second_part 
 		{
-			// Kraj loop-a, bilo da je ugnjezden ili ne
-
-			// Semanticka vrednost prvog dela je labela
-			gen_cmp(loop_transferring_id, loop_transferring_second_literal); // Poredi trenutan i i kraj
+			// Kraj loop-a, bilo da je ugnjezden ili ne - provera uslova i izlazak iz fora ili vracanje na pocetak
+			// ADDS 1 ili step    1
+			// CMP limit          2
+			// JGES start         3
+			// JMP exit           4
 			if(get_type(loop_transferring_id) == INT){
-				code("\n\t\tJGES \t@loop_exit%d", $1); // TODO: Da li ovde moze lab_num? Mozda ovo sve mora u ceo loop?
-				code("\n\t\tADDS \t"); 
-				gen_sym_name(loop_transferring_id);
-				code(",$1,"); // TODO: Ovde u drugom slucaju umesto $1 biti step
-				gen_sym_name(loop_transferring_id);
+				code("\n\t\tADDS \t");
+			}else if(get_type(loop_transferring_id) == UINT){
+				code("\n\t\tADDU \t");
+			}
+			gen_sym_name(loop_transferring_id);
+			if($2 == 0)
+				code(",$1,"); // Nema step
+			else if($2 == 1)
+				code(",$%d,", atoi(get_name(loop_transferring_third_literal))); // Ima step
+			gen_sym_name(loop_transferring_id);
+
+			gen_cmp(loop_transferring_id, loop_transferring_second_literal); // Poredi trenutan i i kraj 
+			
+			if(get_type(loop_transferring_id) == INT){
+				code("\n\t\tJGES \t@loop_exit%d", $1); // Semanticka vrednost prvog dela je labela (isto se koristi lab_num, kao u if-u)
 			}
 			else if(get_type(loop_transferring_id) == UINT){
 				code("\n\t\tJGEU \t@loop_exit%d", $1);
-				code("\n\t\tADDU \t"); 
-				gen_sym_name(loop_transferring_id);
-				code(",$1,"); // TODO: Ovde u drugom slucaju umesto $1 biti step
-				gen_sym_name(loop_transferring_id);
 			}
+			
 			code("\n\t\tJMP \t@loop_start%d", $1); // Skocice ako ne prodje CMP
 			code("\n@loop_exit%d:", $1);
 
-			// Reset
-			loop_transferring_type = 0; 
-			//loop_transferring_id = 0;
-			loop_transferring_first_literal = 0; // Mozda nepotrebno
-			
-			loop_counter--;
-
-			loop_transferring_id = transferring_id_array[loop_counter]; // Bez obzira na dubinu mora se vratiti 1 unazad (resetovace se kada je samo jedan for, jer je array[0] = 0)
-			
-			// Ovaj if moze samo ovo u else da se stavi i bice isto
-			if(transferring_second_literal_array[loop_counter] == 0){ // array[0] = 0 uvek
-				loop_transferring_second_literal = 0; // Reset
-			}else{
-				loop_transferring_second_literal = transferring_second_literal_array[loop_counter];
-			}
 			// Brisanje simbola za loop iz tabele preko steka
-			clear_symbols(stack_of_loop_starts_indexes[stack_indexer]);
-			stack_indexer--;
+			clear_symbols(stack_of_loop_starts_indexes[loop_depth]);
+			loop_depth--; // Vracamo se na manji nivo
+
+			// Resetovanje za sledeci for, ili za prethodni for ako se vracamo iz ugnjezdenog
+			// Bez obzira na dubinu for-ova, vracamo loop_depth_plus_one na nivo manje da bi pravilno resetovali
+			// Imaj na umu da je nulti element ovih nizova dole tacno nula
+			// Ako je bio samo jedan for, uzece taj nulti element i resetovace id i drugi literal na nulu (vise nismo u for-ovima, pa resetujemo za neki tamo sledeci for)
+			// Ako je bio ugnjezden for, uzece nazad id i drugi literal tog prethodnog for-a, da bi pravilno nastavio njegovo izvrsavanje
+			loop_depth_plus_one--;
+			loop_transferring_id = transferring_id_array[loop_depth_plus_one]; // Ako je ldpo 0, lti ce biti 0
+			loop_transferring_second_literal = transferring_second_literal_array[loop_depth_plus_one]; // Ako je ldpo 0, ltsl ce biti 0
+			loop_transferring_third_literal = transferring_third_literal_array[loop_depth_plus_one]; // Ako je ldpo 0, lttl ce biti 0
+			// loop_transferring_type i loop_transferring_first_literal ne moramo da postavljamo na 0 jer ce se overwrite-ovati u novom for-u
 		}
 	;
 
 loop_first_part
 	: FOR LPAREN TYPE ID ASSIGN literal // Prvi literal mora ovde zbog gen_mov-a
 		{
-			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, i ne moze da se koristi ako vec postoji na tom scope-u (nivou) definisana (definisanje -> == block_level, znaci slicno kao variables_only)
+			// TYPE ID mora da napravi lokalnu promenljivu, i to samo u scope-u iteracije, ne moze da se koristi ako vec postoji definisana na tom scope-u (nivou) (definisanje -> == block_level, znaci slicno kao variables_only)
+			// Zapravo ce se praviti novi nivo zbog compound_statement-a
 			for(int i = fun_idx + 1; i <= get_last_element(); i++){
 				if(strcmp(get_name(i), $4) == 0 && get_atr2(i) == block_level){ // Mora == (GVAR ne ubrajamo u proveru za gresku jer moze da ga redefinise)
 					err("Variable or parameter by the name '%s' already exists on this level.\n", $4);
 				}
 			}
 			var_num++;
-			stack_indexer++; // Za prvi loop sa -1 na 0
-			// TODO: Treba neki loop_counter za labele u asm koji se nece resetovati, znaci isto kao kod if-a, mozda da se stavi u novoj akciji izmedju LPAREN i TYPE
-			int idx = insert_symbol($4, VAR, $3, var_num, stack_indexer);
-			stack_of_loop_starts_indexes[stack_indexer] = idx; // Punimo stek, za block_level se stavlja stack_indexer, jer je svaki for novi blok 
+			loop_depth++; // Za prvi for ce preci sa -1 -> 0 (ovo je dubina ugnjezdenih for-ova)
+			int idx = insert_symbol($4, VAR, $3, var_num, loop_depth); // Pravimo int i, za block_level se stavlja loop_depth, jer je svaki for novi blok 
+			stack_of_loop_starts_indexes[loop_depth] = idx; // Punimo stek indeksom ID-a za kasniji clear_symbols()
 
+			// Postavljamo promenljive za prenos u druge pojmove i za ugnjezdene for-ove
 			loop_transferring_type = $3;
 			loop_transferring_id = idx;
-			loop_transferring_first_literal = $6;
-			loop_counter++; // Cim se napravi novi loop
-			transferring_id_array[loop_counter] = idx;
+			loop_transferring_first_literal = $6; // Postavlja indeks, ne stvarnu vrednost literala
+			loop_depth_plus_one++; // Za prvi for ce preci sa 0 -> 1, da bi ostavili nulti kao nula
+			transferring_id_array[loop_depth_plus_one] = idx; // Pocinje da se puni od drugog elementa, da bi ostavili nulti kao nula
 
 			gen_mov(loop_transferring_first_literal, loop_transferring_id); // int i = 1
-			// Pocinju naredbe u loop-u, pa moramo da pravimo labelu za skok
-			lab_num++;
-			$$ = lab_num;
+			// Pocinju naredbe u loop-u, pa moramo da pravimo labelu za povratni skok na pocetak
+			lab_num++; // Svaki for ima svoju labelu, koristi se ista promenljiva kao za if, ne resetuje se
+			$$ = lab_num; // Potrebno za semanticku analizu za kraj loop-a (kao kod if-a)
 			code("\n@loop_start%d:", lab_num);
 		}
 	;
@@ -816,16 +825,18 @@ loop_second_part
 			int lit2 = atoi(get_name($2));
 
 			// get_name($n) je vrednost literala (njegovo ime), ali string, mora atoi()
+			// Zbog ove provere moze CMP da stoji na kraju loop-a
 			if(lit1 >= lit2)
 				err("Start of the loop isn't smaller than the end.\n");
 
-			loop_transferring_second_literal = $2;
-			transferring_second_literal_array[loop_counter] = loop_transferring_second_literal;
-
-			// TODO: Mozda provera treba ovde, odmah na pocetku for-a da slucajno ne izvrsi naredbe iako je i vece od kraja
-			// Ali onda ne bi prosao ovu proveru gore HA!
+			// Postavljamo promenljive za prenos u druge pojmove i za ugnjezdene for-ove
+			loop_transferring_second_literal = $2; // TODO: lit2
+			transferring_second_literal_array[loop_depth_plus_one] = loop_transferring_second_literal; // Pocinje da se puni od drugog elementa, da bi ostavili nulti kao nula TODO: Ovde indeks
 		} 
 	statement
+		{
+			$$ = 0; // Semanticka vrednost oznacava da for nema step (mora u poslednjoj akciji)
+		}
 	| TO literal STEP literal RPAREN 
 		{
 			if(loop_transferring_type != get_type(loop_transferring_first_literal)
@@ -846,10 +857,15 @@ loop_second_part
 			else if(step > (lit2 - lit1))
 				err("Step needs to be lesser or equal to the difference in literals.\n");
 
-			loop_transferring_second_literal = $2;
-			// TODO: Dodaj za treci lit
+			loop_transferring_second_literal = $2; // TODO: lit2
+			transferring_second_literal_array[loop_depth_plus_one] = loop_transferring_second_literal; // TODO: Ovde indeks
+			loop_transferring_third_literal = $4; // TODO: step
+			transferring_third_literal_array[loop_depth_plus_one] = loop_transferring_third_literal; // TODO: Ovde indeks
 		}
 	statement
+		{
+			$$ = 1; // Semanticka vrednost oznacava da for ima step (mora u poslednjoj akciji)
+		}
 	;
 //////////////////////////////////////////////////////////////////////////////////////////////
 // Ovakvim switch-om ne onemogucujemo switch u switch-u, mada se to nece ni pregledati
