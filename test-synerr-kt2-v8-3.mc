@@ -1,12 +1,11 @@
-//OPIS: Ternarni OK 1
-//RETURN: 5
+//OPIS: Ternarni SynErr 3
 
 int a;
 
 int f(int b) {
 	int c;
 	c = 4;
-	a = 1 + (b == c) ? b : c;
+	a = 1 + (1 <= 1) ? 1;
 	return a;
 }
 

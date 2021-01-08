@@ -60,6 +60,8 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 // Samo ok testovi treba da imaju //RETURN:
 // Postoje i warn testovi
 
+// TODO: Uradi proveru za unsigned opet
+
 %{
 	#include <stdio.h>
 	#include <stdlib.h>
@@ -1091,7 +1093,6 @@ finish_optional
 		}
 	| FINISH SEMICOLON
 		{
-			// TODO: JMP na @switch_exit{lab_num}
 			$$ = 1; // Ima finish-a
 		}
 	;

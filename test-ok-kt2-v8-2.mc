@@ -1,4 +1,4 @@
-//OPIS: test-temp
+//OPIS: Ternarni OK 2
 //RETURN: 20
 
 int a;
