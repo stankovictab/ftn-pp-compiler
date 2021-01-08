@@ -33,16 +33,26 @@ void free_if_reg(int reg_index) {
 }
 
 // SYMBOL
-void gen_sym_name(int index) {
+// Izmenjeno da vraca string umesto void
+char *gen_sym_name(int index) {
 	if(index > -1) {
-		if(get_kind(index) == VAR) // -n*4(%14)
+		if(get_kind(index) == VAR) { // -n*4(%14)
 			code("-%d(%%14)", get_atr1(index) * 4);
-		else if(get_kind(index) == PAR) // m*4(%14)
+			// Dodato :
+			static char ret[10];
+			strcpy(ret, "-");
+			char ind[4];
+			sprintf(ind, "%d", get_atr1(index) * 4);
+			strcat(ret, ind);
+			strcat(ret, "(%14)");
+			return ret;
+		} else if(get_kind(index) == PAR) { // m*4(%14)
 			code("%d(%%14)", 4 + get_atr1(index) * 4);
-		else if(get_kind(index) == LIT)
+		} else if(get_kind(index) == LIT) {
 			code("$%s", get_name(index));
-		else //function, reg, gvar
+		} else { //function, reg, gvar
 			code("%s", get_name(index));
+		}
 	}
 }
 

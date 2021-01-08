@@ -9,10 +9,14 @@ int main() {
 	[a] {
 		case 1 -> 
 			a = a + 5;
-			finish;
+			//finish;
 		case 5 ->
 			{
 				b = 3;
+			}
+		case 8 ->
+			{
+				a = 18;
 			}
 		otherwise ->
 			a = a - 1;

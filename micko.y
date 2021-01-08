@@ -22,7 +22,8 @@ Za GVAR je isto atr2 block_level, i uvek je -1.
 symtab.h nije menjan.
 symtab.c je menjan, mora da se stavi "GVAR" u symbol_kinds u print_symtab() jer stavlja (null) umesto GVAR u tabeli.
 defs.h je menjan, dodat je samo VOID kao tip.
-To je to, 4 fajla sam menjao.
+codegen.c i codegen.h su izmenjeni, gen_sym_name vraca string umesto void zbog switch-a.
+To je to, 5 fajla sam menjao.
 Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri pozivanju insert_symbol ili set_atr.
 */
 
@@ -111,6 +112,8 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int transferring_second_literal_array[ARRAY_LIMIT] = {0}; // Niz drugih literala za prenos u ugnjezdene for-ove, nulti element uvek nula
 	int transferring_third_literal_array[ARRAY_LIMIT] = {0}; // Niz trecih literala za prenos u ugnjezdene for-ove, nulti element uvek nula
 	int loop_depth_plus_one = 0; // Indekser za gornje nizove, veci je od loop_depth-a za 1 jer zelimo da preskocimo nulti element
+	int switch_transferring_id = 0;
+	int in_case_flag_register = 0;
 %} 
 
 %union {
@@ -149,7 +152,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 %token RSQUAREBRACKET
 
 // Ovde arguments, argument_list i if_part
-%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part switch_statement finish_optional
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -830,8 +833,8 @@ loop_second_part
 				err("Start of the loop isn't smaller than the end.\n");
 
 			// Postavljamo promenljive za prenos u druge pojmove i za ugnjezdene for-ove
-			loop_transferring_second_literal = $2; // TODO: lit2
-			transferring_second_literal_array[loop_depth_plus_one] = loop_transferring_second_literal; // Pocinje da se puni od drugog elementa, da bi ostavili nulti kao nula TODO: Ovde indeks
+			loop_transferring_second_literal = $2;
+			transferring_second_literal_array[loop_depth_plus_one] = loop_transferring_second_literal; // Pocinje da se puni od drugog elementa, da bi ostavili nulti kao nula
 		} 
 	statement
 		{
@@ -857,10 +860,10 @@ loop_second_part
 			else if(step > (lit2 - lit1))
 				err("Step needs to be lesser or equal to the difference in literals.\n");
 
-			loop_transferring_second_literal = $2; // TODO: lit2
-			transferring_second_literal_array[loop_depth_plus_one] = loop_transferring_second_literal; // TODO: Ovde indeks
-			loop_transferring_third_literal = $4; // TODO: step
-			transferring_third_literal_array[loop_depth_plus_one] = loop_transferring_third_literal; // TODO: Ovde indeks
+			loop_transferring_second_literal = $2;
+			transferring_second_literal_array[loop_depth_plus_one] = loop_transferring_second_literal;
+			loop_transferring_third_literal = $4;
+			transferring_third_literal_array[loop_depth_plus_one] = loop_transferring_third_literal;
 		}
 	statement
 		{
@@ -870,7 +873,8 @@ loop_second_part
 //////////////////////////////////////////////////////////////////////////////////////////////
 // Ovakvim switch-om ne onemogucujemo switch u switch-u, mada se to nece ni pregledati
 // Moze da se napise switch[a] pa opet switch[a], to je podrzano
-// TODO: Isto treba labele koje se ne resetuju, ali nema switch u switch-u
+// TODO: PROMENI - in_case_flag oznacava da je nadjen case u koji ulazimo (od kog zapocinjemo), ali kada udjemo u taj case, vise ne radimo proveru case-eva, nego samo nastavljamo izvrsavanje kroz ceo switch dok ne nadjemo finish - tako je u C-u, jer ako nema finish-a (break-a), samo ce uci u sledeci case (ili otherwise)
+// Jedan od nacina provere case-ova je da se pre svega proveri ceo niz literala pa da se na odredjeni skoci, ali to ne moze ovde jer se taj niz puni kako se dodje do odredjenog case-a
 switch_statement
 	: SWITCH LSQUAREBRACKET ID 
 		{
@@ -894,44 +898,99 @@ switch_statement
 				idx = lookup_symbol($3, GVAR);
 			if(idx == NO_INDEX)
 				err("Variable or parameter '%s' in switch statement not defined.\n", $3);
+
+			lab_num++; // Svaki switch ima svoju labelu, koristi se ista promenljiva kao za if i for, ne resetuje se
+			// Posto ne moze da se napravi switch u switch-u, mozemo direktno da koristimo lab_num za indeksiranje labela, ne treba nam $$ = lab_num;
+			// Nebitna labela, ali dobra za debug
+			code("\n@switch_start%d:", lab_num);
+			switch_transferring_id = idx; // Ne $3
+			in_case_flag_register = take_reg();
+			code("\n\t\tMOV\t$0,%s", gen_sym_name(in_case_flag_register)); // Skarabudzen gen_mov, jer njemu ne moze da se prosledi $0 nego samo indeks iz tabele simbola
 		}
-		RSQUAREBRACKET LCURLYBRACKET case_list otherwise_optional RCURLYBRACKET
+	RSQUAREBRACKET LCURLYBRACKET case_list otherwise_optional RCURLYBRACKET
+		{
+			code("\n@switch_exit%d:", lab_num);
+			free_if_reg(in_case_flag_register); // Reset za sledeci switch
+			in_case_flag_register = 0; // Ovo je mozda nepotrebno
+		}
 	;
 
 case_list
-	: CASETOKEN literal {
-		if(get_type($2) != switch_type)
-			err("Type of literal not the same as type of switcher.\n");
+	: CASETOKEN literal
+		{
+			if(get_type($2) != switch_type)
+				err("Type of literal not the same as type of switcher.\n");
 
-		for(int i = 0; i < ARRAY_LIMIT; i++){
-			if (switch_array[i] == atoi(get_name($2)))
-				err("Literal already in use in switch statement.\n");
-		}
-		// Provere su ok, literal moze da se ubaci
-		switch_array[switch_array_indexer] = atoi(get_name($2));
-		switch_array_indexer++;
-	} ARROW statement finish_optional // finish; ne moze po zadatku da se stavi unutar statement-a, tako da mora van viticastih
-	| case_list CASETOKEN literal {
-		if(get_type($3) != switch_type)
-			err("Type of literal not the same as type of switcher.\n");
+			for(int i = 0; i < ARRAY_LIMIT; i++){
+				if (switch_array[i] == atoi(get_name($2)))
+					err("Literal already in use in switch statement.\n");
+			}
+			// Provere su ok, literal moze da se koristi
 
-		for(int i = 0; i < ARRAY_LIMIT; i++){
-			if (switch_array[i] == atoi(get_name($3)))
-				err("Literal already in use in switch statement.\n");
+			code("\n@case_no%d:", switch_array_indexer);
+			code("\n\t\tCMPS\t%s,$1", gen_sym_name(in_case_flag_register)); // Skarabudzen gen_cmp jer ne prihvata $1 nego samo indekse iz tabele simbola, TODO: Vidi da li moze samo CMPS. Proveravamo da li je registar postavljen na flag, odnosno da li smo usli u dobar case
+			code("\n\t\tJE \t@case_no%d_aftercmp", switch_array_indexer); // Nece skociti na aftercmp labelu ispod ovog CMP dole ako flag nije postavljen
+			gen_cmp(switch_transferring_id, $2); // $2 jer uzima indeks, a ne tacnu vrednost
+
+			switch_array[switch_array_indexer] = atoi(get_name($2));
+			switch_array_indexer++; // Za sledeci
+			
+			code("\n\t\tJNE \t@case_no%d", switch_array_indexer); // Ide na sledeci case ako nije taj, ako jeste samo nastavlja izvrsavanje (code treba da bude ovde zbog inkrementiranja switch_array_indexer-a)
+			code("\n\t\tMOV\t$1,%s", gen_sym_name(in_case_flag_register)); // Usao u case, postavljamo flag, isto ne moze $1 u gen_mov
+			code("\n@case_no%d_aftercmp:", switch_array_indexer);
+		} 
+	ARROW statement finish_optional // finish; ne moze po zadatku da se stavi unutar statement-a, tako da mora van viticastih
+		{
+			if($6 == 1){ // Ako je bilo finish-a
+				code("\n\t\tJMP \t@switch_exit%d", lab_num);
+			}
 		}
-		switch_array[switch_array_indexer] = atoi(get_name($3));
-		switch_array_indexer++;
-	} ARROW statement finish_optional
+	| case_list CASETOKEN literal 
+		{
+			if(get_type($3) != switch_type)
+				err("Type of literal not the same as type of switcher.\n");
+
+			for(int i = 0; i < ARRAY_LIMIT; i++){
+				if (switch_array[i] == atoi(get_name($3)))
+					err("Literal already in use in switch statement.\n");
+			}
+			code("\n@case_no%d:", switch_array_indexer);
+			code("\n\t\tCMPS\t%s,$1", gen_sym_name(in_case_flag_register));
+			code("\n\t\tJE \t@case_no%d_aftercmp", switch_array_indexer);
+			gen_cmp(switch_transferring_id, $3);
+			switch_array[switch_array_indexer] = atoi(get_name($3));
+			switch_array_indexer++;
+			code("\n\t\tJNE \t@case_no%d", switch_array_indexer);
+			code("\n\t\tMOV\t$1,%s", gen_sym_name(in_case_flag_register)); // Usao u case
+			code("\n@case_no%d_aftercmp:", switch_array_indexer);
+		} 
+	ARROW statement finish_optional
+		{
+			if($7 == 1){ // Ako je bilo finish-a
+				code("\n\t\tJMP \t@switch_exit%d", lab_num);
+			}
+		}
 	;
 
 finish_optional
 	: /* empty */
+		{
+			$$ = 0; // Nema finish-a
+		}
 	| FINISH SEMICOLON
+		{
+			// TODO: JMP na @switch_exit{lab_num}
+			$$ = 1; // Ima finish-a
+		}
 	;
 
 otherwise_optional
 	: /* empty */
-	| OTHERWISE ARROW statement
+	| OTHERWISE 
+		{
+			code("\n@case_no%d:", switch_array_indexer); // otherwise je poslednji case_no
+		}
+	ARROW statement
 	;
 
 %%
