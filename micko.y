@@ -905,7 +905,7 @@ switch_statement
 			code("\n@switch_start%d:", lab_num);
 			switch_transferring_id = idx; // Ne $3
 			in_case_flag_register = take_reg();
-			code("\n\t\tMOV\t$0,%s", gen_sym_name(in_case_flag_register)); // Skarabudzen gen_mov, jer njemu ne moze da se prosledi $0 nego samo indeks iz tabele simbola
+			code("\n\t\tMOV\t$0,%s", print_sym_name(in_case_flag_register)); // Skarabudzen gen_mov, jer njemu ne moze da se prosledi $0 nego samo indeks iz tabele simbola
 		}
 	RSQUAREBRACKET LCURLYBRACKET case_list otherwise_optional RCURLYBRACKET
 		{
@@ -927,17 +927,17 @@ case_list
 			}
 			// Provere su ok, literal moze da se koristi
 
-			code("\n@case_no%d:", switch_array_indexer);
-			code("\n\t\tCMPS\t%s,$1", gen_sym_name(in_case_flag_register)); // Skarabudzen gen_cmp jer ne prihvata $1 nego samo indekse iz tabele simbola, TODO: Vidi da li moze samo CMPS. Proveravamo da li je registar postavljen na flag, odnosno da li smo usli u dobar case
-			code("\n\t\tJE \t@case_no%d_aftercmp", switch_array_indexer); // Nece skociti na aftercmp labelu ispod ovog CMP dole ako flag nije postavljen
+			code("\n@case%d_no%d:", lab_num, switch_array_indexer);
+			code("\n\t\tCMPS\t%s,$1", print_sym_name(in_case_flag_register)); // Skarabudzen gen_cmp jer ne prihvata $1 nego samo indekse iz tabele simbola, TODO: Vidi da li moze samo CMPS. Proveravamo da li je registar postavljen na flag, odnosno da li smo usli u dobar case
+			code("\n\t\tJEQ\t@case%d_no%d_aftercmp", lab_num, switch_array_indexer); // Nece skociti na aftercmp labelu ispod ovog CMP dole ako flag nije postavljen
 			gen_cmp(switch_transferring_id, $2); // $2 jer uzima indeks, a ne tacnu vrednost
 
 			switch_array[switch_array_indexer] = atoi(get_name($2));
 			switch_array_indexer++; // Za sledeci
 			
-			code("\n\t\tJNE \t@case_no%d", switch_array_indexer); // Ide na sledeci case ako nije taj, ako jeste samo nastavlja izvrsavanje (code treba da bude ovde zbog inkrementiranja switch_array_indexer-a)
-			code("\n\t\tMOV\t$1,%s", gen_sym_name(in_case_flag_register)); // Usao u case, postavljamo flag, isto ne moze $1 u gen_mov
-			code("\n@case_no%d_aftercmp:", switch_array_indexer);
+			code("\n\t\tJNE\t@case%d_no%d", lab_num, switch_array_indexer); // Ide na sledeci case ako nije taj, ako jeste samo nastavlja izvrsavanje (code treba da bude ovde zbog inkrementiranja switch_array_indexer-a)
+			code("\n\t\tMOV\t$1,%s", print_sym_name(in_case_flag_register)); // Usao u case, postavljamo flag, isto ne moze $1 u gen_mov
+			code("\n@case%d_no%d_aftercmp:", lab_num, switch_array_indexer - 1);
 		} 
 	ARROW statement finish_optional // finish; ne moze po zadatku da se stavi unutar statement-a, tako da mora van viticastih
 		{
@@ -954,15 +954,15 @@ case_list
 				if (switch_array[i] == atoi(get_name($3)))
 					err("Literal already in use in switch statement.\n");
 			}
-			code("\n@case_no%d:", switch_array_indexer);
-			code("\n\t\tCMPS\t%s,$1", gen_sym_name(in_case_flag_register));
-			code("\n\t\tJE \t@case_no%d_aftercmp", switch_array_indexer);
+			code("\n@case%d_no%d:", lab_num, switch_array_indexer);
+			code("\n\t\tCMPS\t%s,$1", print_sym_name(in_case_flag_register));
+			code("\n\t\tJEQ\t@case%d_no%d_aftercmp", lab_num, switch_array_indexer);
 			gen_cmp(switch_transferring_id, $3);
 			switch_array[switch_array_indexer] = atoi(get_name($3));
 			switch_array_indexer++;
-			code("\n\t\tJNE \t@case_no%d", switch_array_indexer);
-			code("\n\t\tMOV\t$1,%s", gen_sym_name(in_case_flag_register)); // Usao u case
-			code("\n@case_no%d_aftercmp:", switch_array_indexer);
+			code("\n\t\tJNE\t@case%d_no%d", lab_num, switch_array_indexer);
+			code("\n\t\tMOV\t$1,%s", print_sym_name(in_case_flag_register)); // Usao u case
+			code("\n@case%d_no%d_aftercmp:", lab_num, switch_array_indexer - 1);
 		} 
 	ARROW statement finish_optional
 		{
@@ -988,7 +988,7 @@ otherwise_optional
 	: /* empty */
 	| OTHERWISE 
 		{
-			code("\n@case_no%d:", switch_array_indexer); // otherwise je poslednji case_no
+			code("\n@case%d_no%d:", lab_num, switch_array_indexer); // otherwise je poslednji case_no
 		}
 	ARROW statement
 	;

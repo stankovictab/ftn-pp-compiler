@@ -14,6 +14,7 @@ int main() {
 			{
 				b = 3;
 			}
+				finish;
 		case 8 ->
 			{
 				a = 18;

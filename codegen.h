@@ -11,7 +11,9 @@ void free_if_reg(int reg_index);
 
 // ispisuje simbol (u odgovarajucem obliku)
 // koji se nalazi na datom indeksu u tabeli simbola
-char *gen_sym_name(int index); // Promenjeno sa void na char*
+void gen_sym_name(int index);
+
+char *print_sym_name(int index);
 
 // generise CMP naredbu, parametri su indeksi operanada u TS-a
 void gen_cmp(int operand1_index, int operand2_index);

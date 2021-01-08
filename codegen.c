@@ -34,10 +34,25 @@ void free_if_reg(int reg_index) {
 
 // SYMBOL
 // Izmenjeno da vraca string umesto void
-char *gen_sym_name(int index) {
+void gen_sym_name(int index) {
 	if(index > -1) {
 		if(get_kind(index) == VAR) { // -n*4(%14)
 			code("-%d(%%14)", get_atr1(index) * 4);
+		} else if(get_kind(index) == PAR) { // m*4(%14)
+			code("%d(%%14)", 4 + get_atr1(index) * 4);
+		} else if(get_kind(index) == LIT) {
+			code("$%s", get_name(index));
+		} else { //function, reg, gvar
+			code("%s", get_name(index));
+		}
+	}
+}
+
+// Dodato
+char *print_sym_name(int index) {
+	if(index > -1) {
+		if(get_kind(index) == VAR) { // -n*4(%14)
+			//code("-%d(%%14)", get_atr1(index) * 4);
 			// Dodato :
 			static char ret[10];
 			strcpy(ret, "-");
@@ -47,11 +62,13 @@ char *gen_sym_name(int index) {
 			strcat(ret, "(%14)");
 			return ret;
 		} else if(get_kind(index) == PAR) { // m*4(%14)
-			code("%d(%%14)", 4 + get_atr1(index) * 4);
+			//code("%d(%%14)", 4 + get_atr1(index) * 4);
+			// TODO:
 		} else if(get_kind(index) == LIT) {
-			code("$%s", get_name(index));
+			//code("$%s", get_name(index));
+			// TODO:
 		} else { //function, reg, gvar
-			code("%s", get_name(index));
+			return get_name(index);
 		}
 	}
 }
