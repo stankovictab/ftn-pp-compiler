@@ -36,6 +36,8 @@
 "="                  { return ASSIGN; }
 ","                  { return COMMA; }
 "++"                 { return INCREMENT; }
+"?"					 { return QUESTIONMARK; }
+":"					 { return COLON; }
 
 "+"                  { yylval.i = ADD; return AROP; }
 "-"                  { yylval.i = SUB; return AROP; }

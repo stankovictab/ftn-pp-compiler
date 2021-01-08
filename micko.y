@@ -44,6 +44,8 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 // Mora da se vidi koji su se ID-evi inkrementovali, da se oni posle ovoga inkrementuju
 // Treba da napravim testove za inkrement u svim slucajevima ako vec ne postoji
 
+// Za test-ok-kt2-v7-3-1.mc sam morao da promenim return na 54 umesto 53 zbog implementacije post-inkrement-a, ja sam koristio objasnjenje na pdf-u sa vezbi, ali je rezultat trazen dobijen preko standardnog gcc nacina inkrementiranja (kod mene se y++ obavi, ali se u gcc-u to override-uje zbog dodele, i inkrement se nece desiti)
+// Primer :
 // Za a==1, a = a++ + a++ ce biti ovako:
 // prvo a++ ce biti 1, jer se ++ radi tek posle
 // Kada dodje do + izmedju, uradio se taj ++, i sada su nove vrednosti za a 2, ali je leva strana jos uvek 1
@@ -53,11 +55,10 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 // dakle ++ ce menjati sledece a, a ne to na kojem je zakaceno, osim poslednjeg ++ koji ne menja nista
 // Za a==1, a = ++a + ++a ce biti 6, jer prvo inkrementuje a pa opet ink a, pa sabira a i a
 
-// ASM parsing error znaci da HipSim-u ne saljes .asm fajl
+// ASM parsing error znaci da se HipSim-u ne prosledjuje .asm fajl
 // Ako nema //RETURN:, to ce biti PASSED
 // Samo ok testovi treba da imaju //RETURN:
-
-// TODO: Svaki test u C da vidis result pa uporedi sa -r rezultatom
+// Postoje i warn testovi
 
 %{
 	#include <stdio.h>
@@ -68,7 +69,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	#include "codegen.h" // KT2
 
 	#define ARRAY_LIMIT 100
-	#define INT_MIN -2147483648
+	#define INT_MIN -2147483648 // TODO: Ili -32766? Jer je ovo mozda long min? Ne menja stvari.
 
 	int yyparse(void);
 	int yylex(void);
@@ -114,6 +115,7 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 	int loop_depth_plus_one = 0; // Indekser za gornje nizove, veci je od loop_depth-a za 1 jer zelimo da preskocimo nulti element
 	int switch_transferring_id = 0;
 	int in_case_flag_register = 0;
+	int lab_num_ternary = 0; // TODO: Ako imamo for ili if u case-u mozda to nece da radi jer svi koriste lab_num, pa mozda treba da se prave posebni lab_num-ovi za razlicite pojmove
 %} 
 
 %union {
@@ -150,9 +152,11 @@ Nacin na koji "menjamo" atribute u tabeli simbola je samo menjanjem unosa pri po
 %token FINISH
 %token LSQUAREBRACKET
 %token RSQUAREBRACKET
+%token QUESTIONMARK
+%token COLON
 
 // Ovde arguments, argument_list i if_part
-%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part switch_statement finish_optional
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part switch_statement finish_optional ternary_operator
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -520,6 +524,114 @@ exp
 		}
 	| LPAREN num_exp RPAREN
 		{ $$ = $2; /* exp nasledjuje semanticku vrednost num_exp-a u zagradi */ }
+	| ternary_operator
+	;
+
+ternary_operator
+	: LPAREN rel_exp RPAREN QUESTIONMARK ID COLON ID // Ne mora @ternary_start0, bacace konflikt ako se doda ovde
+		{
+			int idx = NO_INDEX;
+			int idy = NO_INDEX;
+			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $5) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idx = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
+				if(strcmp(get_name(j), $7) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idy = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
+			}
+			if(idx == NO_INDEX)
+				idx = lookup_symbol($5, GVAR);
+			if(idy == NO_INDEX)
+				idy = lookup_symbol($7, GVAR);
+			if(idx == NO_INDEX)
+				err("'%s' undeclared.\n", $5);
+			if(idy == NO_INDEX)
+				err("'%s' undeclared.\n", $7);
+
+			if(get_type(idx) != get_type(idy))
+				err("Different types of ID's in expression!\n");
+
+			$$ = take_reg();
+			// Zauzima se registar opste namene u koji ce da se stavlja rezultat operatora, oslobodice se u num-exp-u preko free_if_reg() tamo, isto kao kod function_call 
+			// $$ mora da se postavi jer exp mora da ima semanticku vrednost koja je indeks u tabeli simbola
+
+			// Zamisli ovde code() iz rel_exp-a koji ispisuje CMP, onda posle toga treba uslovni skok na osnovu operacije koja je bila, a to dobijamo iz semanticke vrednosti rel_exp-a
+			// Ako je bilo >=, indeks $2 bi bio za JGES, a nama za skok na labelu za povracaj drugog id-a treba oppjumps, pa bi bilo JLTS
+			// Ako ne skoci, vraca prvi ID za u num_exp, ako skoci vraca drugi
+			code("\n\t\t%s\t@ternary_second_id%d", opp_jumps[$2], lab_num_ternary); 
+			gen_mov(idx, $$); // Prvi ID se postavlja kao povratna vrednost
+			code("\n\t\tJMP \t@ternary_exit%d", lab_num_ternary); // Da ne udje u labelu za drugi ID
+
+			code("\n@ternary_second_id%d:", lab_num_ternary);
+			gen_mov(idy, $$); // Drugi ID se postavlja kao povratna vrednost
+			
+			code("\n@ternary_exit%d:", lab_num_ternary++); // Inkrementiramo lab_num_ternary za sledece ternarne
+			// Nastavlja sa naredbama za num_exp
+		}
+	| LPAREN rel_exp RPAREN QUESTIONMARK ID COLON literal
+		{
+			int idx = NO_INDEX;
+			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $5) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idx = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
+			}
+			if(idx == NO_INDEX)
+				idx = lookup_symbol($5, GVAR);
+			if(idx == NO_INDEX)
+				err("'%s' undeclared.\n", $5);
+
+			if(get_type(idx) != get_type($7))
+				err("Different types of operands in expression!\n");
+
+			$$ = take_reg();
+			code("\n\t\t%s\t@ternary_second_lit%d", opp_jumps[$2], lab_num_ternary); 
+			gen_mov(idx, $$);
+			code("\n\t\tJMP \t@ternary_exit%d", lab_num_ternary);
+			code("\n@ternary_second_lit%d:", lab_num_ternary);
+			gen_mov($7, $$);
+			code("\n@ternary_exit%d:", lab_num_ternary++);
+		}
+	| LPAREN rel_exp RPAREN QUESTIONMARK literal COLON ID
+		{
+			int idy = NO_INDEX;
+			// Prvo gleda VAR|PAR trenutne funkcije, pa tek onda GVAR, jer VAR ima prednost
+			// Razlog zasto gleda VAR|PAR trenutne funkcije je da ne bi slucajno uzeo parametar neke trece funkcije
+			for(int j = fun_idx + 1; j <= get_last_element(); j++){
+				if(strcmp(get_name(j), $7) == 0) // Moze i ne mora && get_atr2(j) <= block_level
+					idy = j; // Uzece tacno onaj simbol koji nam treba jer je gornji if prosao
+			}
+			if(idy == NO_INDEX)
+				idy = lookup_symbol($7, GVAR);
+			if(idy == NO_INDEX)
+				err("'%s' undeclared.\n", $7);
+
+			if(get_type($5) != get_type(idy))
+				err("Different types of operands in expression!\n");
+
+			$$ = take_reg();
+			code("\n\t\t%s\t@ternary_second_lit%d", opp_jumps[$2], lab_num_ternary); 
+			gen_mov($5, $$);
+			code("\n\t\tJMP \t@ternary_exit%d", lab_num_ternary);
+			code("\n@ternary_second_lit%d:", lab_num_ternary);
+			gen_mov(idy, $$);
+			code("\n@ternary_exit%d:", lab_num_ternary++);
+		}
+	| LPAREN rel_exp RPAREN QUESTIONMARK literal COLON literal
+		{
+			if(get_type($5) != get_type($7))
+				err("Different types of literals in expression!\n");
+
+			$$ = take_reg();
+			code("\n\t\t%s\t@ternary_second_lit%d", opp_jumps[$2], lab_num_ternary); 
+			gen_mov($5, $$);
+			code("\n\t\tJMP \t@ternary_exit%d", lab_num_ternary);
+			code("\n@ternary_second_lit%d:", lab_num_ternary);
+			gen_mov($7, $$);
+			code("\n@ternary_exit%d:", lab_num_ternary++);
+		}
 	;
 
 literal
@@ -561,7 +673,7 @@ function_call
 
 			// Generisanje koda za argumente - push-ujemo ih na stackframe u obrnutom redosledu, mora pre CALL-a
 			for(int i = argument_number - 1; i >= 0; i--){
-				free_if_reg(argument_pusher_array[i]);
+				free_if_reg(argument_pusher_array[i]); // Oslobadja se zbog zauzimanja u num_exp-u // TODO: Valjda
 				code("\n\t\t\tPUSH\t");
 				gen_sym_name(argument_pusher_array[i]); // Generisace asm kod za registar u kojem je vrednost num_exp-a
 			}
@@ -681,7 +793,7 @@ rel_exp
        		// $2 daje jednu od onih 6 standardnih relop-a
 			// Moramo da gledamo tip operanda da bi znali koji tacno skok da uradimo, da li S ili U
 			// Pa ce ova zagrada desno biti ili 0 (za S) ili 6 (za U) (jer get_type vraca ili 1 ili 2)
-			// Pa ce semanticka vrednost rel_exp-a biti indeks odgovarajuceg uslovnog skoka u enumeraciji
+			// Pa ce semanticka vrednost rel_exp-a biti indeks odgovarajuceg uslovnog skoka u enumeraciji jumps (ne opp_jumps TODO: valjda)
 			$$ = $2 + ((get_type($1) - 1) * RELOP_NUMBER);
         	gen_cmp($1, $3); // Na primer CMPS %3, %4 (gen_cmp gleda da li su int ili uint pa ce biti ili CMPS ili CMPU)
 		}
