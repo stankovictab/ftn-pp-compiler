@@ -1,4 +1,4 @@
-//OPIS: test-temp
+//OPIS: 3. Personalni (Switch) OK Test 4
 //RETURN: 2
 
 int main() {

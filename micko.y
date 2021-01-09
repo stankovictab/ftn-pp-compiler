@@ -30,20 +30,22 @@ Ako nema //RETURN:, to ce biti PASSED
 Samo ok testovi treba da imaju //RETURN:
 Postoje i warn testovi
 
-Za test-ok-kt2-v7-3-1.mc sam morao da promenim return na 54 umesto 53 zbog implementacije post-inkrement-a
-Ja sam koristio objasnjenje na pdf-u sa vezbi, ali je trazeni rezultat dobijen preko standardnog gcc nacina inkrementiranja 
-Kod mene se y++ inkrementira nakon assign-a, ali u gcc-u assign to override-uje, i inkrement se nece desiti
+Za test-ok-kt2-v7-3-1.mc (koji je sa vezbi) sam morao da promenim return na 54 umesto 53 zbog implementacije post-inkrement-a, ja sam koristio objasnjenje na pdf-u sa vezbi, ali je trazeni rezultat dobijen preko standardnog gcc nacina inkrementiranja.
+Kod mene se y++ inkrementira nakon dodele, ali u gcc-u assign to override-uje, i inkrement se nece desiti.
 Na primer, za a == 1, a = a++ + a++, gcc nacin (koji ovde nije implementiran) ce raditi ovako :
-Prvo a++ ce biti 1, jer se ++ radi tek posle
-Kada dodje do + izmedju, uradio se taj ++, i sada je a postalo 2, ali je leva strana jos uvek 1
-Onda ce biti 1+2 sve to, a ovo drugo a++ nema uticaja jer ce ga override-ovati celokupna dodela
-Da smo imali jos nesto da saberemo posle toga, onda bi se a ponovo uvecalo
-Tako da je rezultat 3, a ne 4
-Dakle ++ ce menjati sledece a, a ne to na kojem je zakaceno, osim poslednjeg a++ koji ne menja nista
-y = x++ + y++ ce po gcc-u inkrementovati x posle, ali y nece - po mojoj implementaciji ce inkrementovati i y
-Za a == 1, a = ++a + ++a ce biti 6, jer prvo inkrementuje a pa opet ink a, pa sabira a i a, koje je 3 + 3
-Takodje, a = a++; nece da inkrementuje po gcc-u ali ovde hoce
-Znaci pretpostavljamo da je svaki ID maksimalno jednom inkrementiran u assign_statement-u, jer su oni tako na pdf-u prikazali asembler, zapravo po gcc-u treba da se uveca za 1 ako se ID inkrementovao dvaput u izrazu, ili da se uveza za 3 ako se pojavio triput, etc
+- Prvo a++ ce biti 1, jer se ++ radi tek posle
+- Kada dodje do + izmedju, uradio se taj ++, i sada je a postalo 2, ali je leva strana jos uvek 1
+- Onda ce biti 1 + 2 sve to, a ovo drugo a++ nema uticaja jer ce ga override-ovati celokupna dodela
+Da smo imali jos nesto da saberemo posle toga, onda bi se a ponovo uvecalo.
+Tako da je rezultat 3, a ne 4.
+Dakle ++ ce menjati sledece a, a ne to na kojem je zakaceno, osim poslednjeg a++ koji ne menja nista.
+y = x++ + y++ ce po gcc-u inkrementovati x posle, ali y nece - po mojoj implementaciji ce inkrementovati i y.
+Takodje, a = a++; nece da inkrementuje po gcc-u, ali ovde hoce.
+Ostale testove nisam morao da menjam, jer su izgleda rezultati dobijeni ovim nacinom.
+Znaci pretpostavljamo da je svaki ID maksimalno jednom inkrementiran u assign_statement-u, jer je tako na pdf-u prikazan asembler, zapravo po gcc-u treba da se uveca za 1 ako se ID inkrementovao dvaput u izrazu, ili da se uveza za 3 ako se pojavio triput, etc.
+Za a == 1, a = ++a + ++a ce biti 6, jer prvo inkrementuje a pa opet ink a, pa sabira a i a, koje je 3 + 3.
+
+Sanity test sam promenio da ima return, jer sanity testovi ne prolaze ako baca warning.
 */
 
 %{
@@ -144,7 +146,7 @@ Znaci pretpostavljamo da je svaki ID maksimalno jednom inkrementiran u assign_st
 %token QUESTIONMARK
 %token COLON
 
-%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part switch_statement finish_optional ternary_operator
+%type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part switch_statement finish_optional ternary_operator assign_optional
 
 %nonassoc ONLY_IF
 %nonassoc ELSE
@@ -330,7 +332,7 @@ variables_def_line
 		}
 	;
 
-variables_only
+/* variables_only
 	: ID
 		{
 			// Pri deklarisanju varijable trebamo da proverimo da li vec u toj trenutnoj funkciji postoje varijable ili parametri sa tim imenom
@@ -361,6 +363,59 @@ variables_only
 			}
 			var_num++;
 			insert_symbol($3, VAR, vartype, var_num, block_level);
+		}
+	; */
+
+variables_only
+	: ID assign_optional
+		{
+			// Pri deklarisanju varijable trebamo da proverimo da li vec u toj trenutnoj funkciji postoje varijable ili parametri sa tim imenom
+			// To znaci da varijabla moze imati isto ime kao neka prethodna funkcija ili njeni parametri
+			// Ne mozemo da gledamo po lookup_symbol(VAR|PAR) jer to gleda celu tabelu (od nazad pa do 13. registra (FUNREG)) 
+			// To pravi problem zbog parametara, jer se oni ovde ne brisu iz tabele na kraju funkcije
+			// Idemo od indeksa funkcije u kojoj je deklarisana varijabla (fun_idx) do kraja tabele
+			// Ne gledamo sam simbol funkcije jer lokalna varijabla moze da ima isto ime kao njena funkcija
+			// Poredimo imena sa svakim simbolom (varijable i parametri), i ako se poklopi javljamo gresku, ako ne nadje isto ime dodajemo
+			// Za tip varijable koristimo vartype koji je postavljen u variables_def_line
+			// Takodje dodajemo proveru za nivo bloka, da na trenutnom nivou ne moze da se definise promenljiva koja je tu vec definisana (bitno je da je definisana, a ne koja tu samo postoji, jer ako smo pre imali int a;, i u novom bloku opet int a;, to moze jer ce se vrednost a overwrite-ovati samo u tom scope-u, vidi compound_statement)
+			// Ne radi se provera za GVAR jer promenljiva moze da ima isto ime, samo ce se vrednost overwrite-ovati u tom scope-u
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
+				if(strcmp(get_name(i), $1) == 0 && get_atr2(i) == block_level){ // Mora == kada definisemo varijablu
+					err("Variable or parameter by the name '%s' already exists on this level.\n", $1);
+				}
+			}
+			if($2 != -1 && vartype != get_type($2)) // Ako je bilo assignment-a
+				err("Types in variable declaration do not match!\n");
+			var_num++;
+			int idx = insert_symbol($1, VAR, vartype, var_num, block_level);
+			if($2 != -1)
+				gen_mov($2, idx);
+		}
+	| variables_only COMMA ID assign_optional
+		{
+			// Ista provera i za ovu alternativu
+			for(int i = fun_idx + 1; i <= get_last_element(); i++){
+				if(strcmp(get_name(i), $3) == 0 && get_atr2(i) == block_level){
+					err("Variable or parameter by the name '%s' already exists on this level.\n", $3);
+				}
+			}
+			if($4 != -1 && vartype != get_type($4)) // Ako je bilo assignment-a
+				err("Types in variable declaration do not match!\n");
+			var_num++;
+			int idx = insert_symbol($3, VAR, vartype, var_num, block_level);
+			if($4 != -1)
+				gen_mov($4, idx);
+		}
+	;
+
+assign_optional
+	: 
+		{
+			$$ = -1;
+		}
+	| ASSIGN num_exp
+		{
+			$$ = $2;
 		}
 	;
 
