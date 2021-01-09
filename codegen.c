@@ -53,7 +53,7 @@ char *print_sym_name(int index) {
 	if(index > -1) {
 		if(get_kind(index) == VAR) { // -n*4(%14)
 			//code("-%d(%%14)", get_atr1(index) * 4);
-			// Dodato :
+			// Dodato : (Ali je nepotrebno)
 			static char ret[10];
 			strcpy(ret, "-");
 			char ind[4];
