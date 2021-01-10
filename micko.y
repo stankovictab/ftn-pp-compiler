@@ -46,6 +46,9 @@ Znaci pretpostavljamo da je svaki ID maksimalno jednom inkrementiran u assign_st
 Za a == 1, a = ++a + ++a ce biti 6, jer prvo inkrementuje a pa opet ink a, pa sabira a i a, koje je 3 + 3.
 
 Sanity test sam promenio da ima return, jer sanity testovi ne prolaze ako baca warning.
+
+Tek sad vidim da nisam morao da pisem print_sym_name(), nego samo da radim code(CMPS $1), 
+pa u liniji ispod toga gen_sym_name() za registar sa flag-om, nebitno
 */
 
 %{
@@ -896,7 +899,6 @@ loop
 	: loop_first_part loop_second_part 
 		{
 			// Kraj loop-a, bilo da je ugnjezden ili ne - provera uslova i izlazak iz fora ili vracanje na pocetak
-			// labela za taj deo zbog skip-a
 			// ADDS 1 ili step    1
 			// CMP limit          2
 			// JGES start         3
@@ -1106,7 +1108,7 @@ case_list
 			code("\n@case%d_no%d:", lab_num_switch, switch_array_indexer);
 			code("\n\t\tCMPS\t%s,$1", print_sym_name(in_case_flag_register)); // Skarabudzen gen_cmp jer ne prihvata $1 nego samo indekse iz tabele simbola. Proveravamo da li je registar postavljen na flag, odnosno da li smo usli u dobar case.
 			code("\n\t\tJEQ\t@case%d_no%d_aftercmp", lab_num_switch, switch_array_indexer); // Nece skociti na aftercmp labelu ispod ovog CMP dole ako flag nije postavljen
-			gen_cmp(switch_transferring_id, $2); // $2 jer uzima indeks, a ne tacnu vrednost
+			gen_cmp(switch_transferring_id, $2); // Provera za ulazak u case ($2 jer uzima indeks, a ne tacnu vrednost)
 
 			switch_array[switch_array_indexer] = atoi(get_name($2));
 			switch_array_indexer++; // Za sledeci
@@ -1161,9 +1163,14 @@ finish_optional
 
 otherwise_optional
 	: /* empty */
+		{
+			// Mora code za kada nema otherwise-a, da bi ipak na kraju skocilo na neki case
+			// Ovo je zapravo kvazi case koji nema telo nego samo nastavlja na switch_exit
+			code("\n@case%d_no%d:", lab_num_switch, switch_array_indexer);
+		}
 	| OTHERWISE 
 		{
-			code("\n@case%d_no%d:", lab_num_switch, switch_array_indexer); // otherwise je poslednji case_no
+			code("\n@case%d_no%d:", lab_num_switch, switch_array_indexer); // otherwise je poslednji case_no, i on nema CMP u sebi, na njega se skace ako se ni jedan case ne okine
 		}
 	ARROW statement
 	;
