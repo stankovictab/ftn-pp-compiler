@@ -25,6 +25,8 @@
 "->"				 { return ARROW; }
 "otherwise"			 { return OTHERWISE; }
 "finish"			 { return FINISH; }
+"skip"				 { return SKIP; }
+"terminate"			 { return TERMINATE; }
 
 "("                  { return LPAREN; }
 ")"                  { return RPAREN; }

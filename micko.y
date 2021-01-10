@@ -107,6 +107,7 @@ Sanity test sam promenio da ima return, jer sanity testovi ne prolaze ako baca w
 	int lab_num_ternary = 0; // Samo je ovaj na 0 
 	int lab_num_switch = -1;
 	int lab_num_loop = -1;
+	int in_loop = 0; // Flag za skip i terminate
 %} 
 
 %union {
@@ -145,6 +146,8 @@ Sanity test sam promenio da ima return, jer sanity testovi ne prolaze ako baca w
 %token RSQUAREBRACKET
 %token QUESTIONMARK
 %token COLON
+%token SKIP
+%token TERMINATE
 
 %type <i> num_exp exp literal function_call arguments rel_exp argument_list if_part increment_optional loop_first_part loop_second_part switch_statement finish_optional ternary_operator assign_optional
 
@@ -433,6 +436,8 @@ statement
 	| increment_statement
 	| loop
 	| switch_statement
+	| skip
+	| terminate
 	;
 
 // Svaki compound_statement se razlikuje po svom nivou, koji je atr2 kod njegovih lokalnih varijabli
@@ -891,10 +896,12 @@ loop
 	: loop_first_part loop_second_part 
 		{
 			// Kraj loop-a, bilo da je ugnjezden ili ne - provera uslova i izlazak iz fora ili vracanje na pocetak
+			// labela za taj deo zbog skip-a
 			// ADDS 1 ili step    1
 			// CMP limit          2
 			// JGES start         3
 			// JMP exit           4
+			code("\n@loop_cmp%d:", $1); // Zbog JMP u skip
 			if(get_type(loop_transferring_id) == INT){
 				code("\n\t\tADDS \t");
 			}else if(get_type(loop_transferring_id) == UINT){
@@ -933,6 +940,7 @@ loop
 			loop_transferring_second_literal = transferring_second_literal_array[loop_depth_plus_one]; // Ako je ldpo 0, ltsl ce biti 0
 			loop_transferring_third_literal = transferring_third_literal_array[loop_depth_plus_one]; // Ako je ldpo 0, lttl ce biti 0
 			// loop_transferring_type i loop_transferring_first_literal ne moramo da postavljamo na 0 jer ce se overwrite-ovati u novom for-u
+			in_loop--; // Za skip i terminate (mora dekrement umesto = 0 zbog ugnjezdavanja)
 		}
 	;
 
@@ -963,6 +971,7 @@ loop_first_part
 			lab_num_loop++; // Svaki for ima svoju labelu, koristi se promenljiva bas za loop zbog ugnjezdenosti, ne resetuje se
 			$$ = lab_num_loop; // Potrebno za semanticku analizu za kraj loop-a (kao kod if-a)
 			code("\n@loop_start%d:", lab_num_loop);
+			in_loop++; // Za skip i terminate (mora inkrement umesto = 1 zbog ugnjezdavanja)
 		}
 	;
 
@@ -1018,6 +1027,24 @@ loop_second_part
 	statement
 		{
 			$$ = 1; // Semanticka vrednost oznacava da for ima step (mora u poslednjoj akciji)
+		}
+	;
+
+skip
+	: SKIP SEMICOLON
+		{
+			if(in_loop == 0) // Ako je in_loop veci od 0, u nekom loop-u smo sigurno
+				err("Skip statement called outside of loop!\n");
+			code("\n\t\tJMP \t@loop_cmp%d", lab_num_loop); // Ne moze da skace na start, nego na kraj, jer je tu CMP iteratora
+		}
+	;
+
+terminate
+	: TERMINATE SEMICOLON
+		{
+			if(in_loop == 0)
+				err("Terminate statement called outside of loop!\n");
+			code("\n\t\tJMP \t@loop_exit%d", lab_num_loop);
 		}
 	;
 
